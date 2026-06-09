@@ -1,0 +1,61 @@
+/* RIGHT SIDE SKY BACKGROUND */
+.content {
+  min-height: 100vh;
+  padding: 24px;
+
+  background-image: url('/skyside-bg.png'); /* your sky image */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  /* subtle overlay for readability */
+  position: relative;
+}
+
+.content::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.55); /* light cloud effect */
+  z-index: 0;
+}
+
+/* Ensure actual page content stays above overlay */
+.content > * {
+  position: relative;
+  z-index: 1;
+}
+/* WHITE CARD LOOK FOR FORMS & TABLES */
+.card,
+.shipments-page,
+.wizard,
+.table-wrap {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+/* RIGHT SIDE BACKGROUND */
+.content,
+.main-content {
+  min-height: 100vh;
+  padding: 24px;
+
+  background-image: url("C:\Users\ATOLE\Desktop\centralized_logistics_regenerated\frontend\src\styles\skyside-bg.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+}
+

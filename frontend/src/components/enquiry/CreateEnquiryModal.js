@@ -90,7 +90,7 @@ function extractDigits(partNo, position = "first", count = 3) {
    BO Part Number Builder Drawer Component
 ───────────────────────────────────────────── */
 // CHANGE 3: Prefix type is now constant "B" — removed PREFIX_OPTIONS
-const COMPANY_CODES  = ["ZET", "MAC", "FOR", "ABC", "Custom"];
+const COMPANY_CODES  = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA",];
 const FIXED_PREFIX   = "B";
 
 function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {

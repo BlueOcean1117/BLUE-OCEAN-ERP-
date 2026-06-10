@@ -67,19 +67,25 @@ function derivePrefix(name) {
 /* ─────────────────────────────────────────────
    Helper: extract first/last N digits from part no
 ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   Helper: extract first/last N digits from part no
+───────────────────────────────────────────── */
 function extractDigits(partNo, position = "first", count = 3) {
-  if (!partNo) return "";
-  const clean = String(partNo).trim();
-  if (clean.length === 0) return "";
-  const lastThree  = clean.slice(-3);
-  let   firstPart  = clean.slice(0, -3);
-  if (firstPart.length < 3)      firstPart = firstPart.padStart(3, "0");
-  else if (firstPart.length > 3) firstPart = firstPart.substring(0, 3);
-  if (position === "first") return firstPart;
-  if (position === "last")  return lastThree;
+  if (!partNo) return "0".repeat(count);
+  // Step 1: replace every symbol with "0", keep alphabets and numbers as-is
+  // e.g. "BH-015" → "BH0015"  |  "AB@12" → "AB012"  |  "12#34$56" → "12034056"
+  const converted = partNo.replace(/[^A-Za-z0-9]/g, "0");
+  if (!converted) return "0".repeat(count);
+  // Step 2: left-pad with zeros if shorter than 6
+  // e.g. "BH015"(5) → "0BH015"  |  "XYZ"(3) → "000XYZ"  |  "12345"(5) → "012345"
+  const padded = converted.length < count * 2
+    ? converted.padStart(count * 2, "0")
+    : converted;
+  // Step 3: first 3 and last 3 of the padded value
+  if (position === "first") return padded.slice(0, count);
+  if (position === "last")  return padded.slice(-count);
   return "";
 }
-
 /* ─────────────────────────────────────────────
    BO Part Number Builder Drawer Component
 ───────────────────────────────────────────── */

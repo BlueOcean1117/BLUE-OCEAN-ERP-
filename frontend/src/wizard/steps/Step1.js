@@ -80,6 +80,17 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
   // The database may store parts with slightly different key names than what
   // the form uses. This maps every known alias → the canonical form key so
   // ALL fields prefill correctly regardless of backend naming convention.
+  // Converts ISO date strings ("2026-06-14T00:00:00.000Z") to "YYYY-MM-DD"
+  // so <input type="date"> renders correctly. Returns "" for null/undefined.
+  function toDateInput(val) {
+    if (!val) return "";
+    if (typeof val === "string" && val.includes("T")) return val.split("T")[0];
+    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    return "";
+  }
+
   function normalizePart(p) {
     if (!p) return p;
     return {
@@ -87,7 +98,7 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
       part_no:          p.part_no          ?? p.partNo          ?? p.part_number  ?? p.partNumber  ?? "",
       part_desc:        p.part_desc        ?? p.partDesc        ?? p.part_description ?? p.description ?? "",
       part_qty:         p.part_qty         ?? p.partQty         ?? p.qty          ?? p.quantity     ?? 0,
-      part_net_unit:    p.part_net_unit    ?? p.partNetUnit     ?? p.net_wt       ?? p.net_wt_unit  ?? p.netWt ?? p.net_weight_unit ?? 0,
+      part_net_unit:    p.part_net_unit    ?? p.net_wt_per_unit ?? p.partNetUnit  ?? p.net_wt_unit  ?? p.netWt ?? p.net_weight_unit ?? p.net_wt ?? 0,
       part_gross:       p.part_gross       ?? p.partGross       ?? p.gross_wt     ?? p.grossWt      ?? p.gross_weight ?? 0,
       part_total_net_wt:p.part_total_net_wt?? p.partTotalNetWt ?? p.total_net_wt  ?? p.totalNetWt   ?? 0,
       part_box_size:    p.part_box_size    ?? p.partBoxSize     ?? p.box_size     ?? p.boxSize      ?? "",
@@ -103,16 +114,16 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
       // top-level aliases
       enquiry_no:          raw.enquiry_no      ?? raw.enquiryNo      ?? raw.enquiry_number ?? "",
       invoice_no:          raw.invoice_no      ?? raw.invoiceNo      ?? "",
-      invoice_date:        raw.invoice_date    ?? raw.invoiceDate    ?? "",
+      invoice_date:        toDateInput(raw.invoice_date    ?? raw.invoiceDate    ?? ""),
       ff:                  raw.ff              ?? raw.freight_forwarder ?? "",
       incoterm:            raw.incoterm        ?? raw.inco_term      ?? "",
       mode:                raw.mode            ?? "Sea",
       customer:            raw.customer        ?? raw.customer_name  ?? "",
       supplier_name:       raw.supplier_name   ?? raw.supplier       ?? "",
       sb_no:               raw.sb_no           ?? raw.sbNo           ?? raw.shipping_bill_no ?? "",
-      sb_date:             raw.sb_date         ?? raw.sbDate         ?? raw.shipping_bill_date ?? "",
-      etd:                 raw.etd             ?? "",
-      final_delivery_date: raw.final_delivery_date ?? raw.finalDeliveryDate ?? raw.eta ?? "",
+      sb_date:             toDateInput(raw.sb_date         ?? raw.sbDate         ?? raw.shipping_bill_date),
+      etd:                 toDateInput(raw.etd             ?? ""),
+      final_delivery_date: toDateInput(raw.final_delivery_date ?? raw.finalDeliveryDate ?? raw.eta ?? ""),
       bl_no:               raw.bl_no           ?? raw.blNo           ?? raw.bl_number ?? "",
       container_no:        raw.container_no    ?? raw.containerNo    ?? raw.container_number ?? "",
       pol:                 raw.pol             ?? raw.port_of_loading ?? "",

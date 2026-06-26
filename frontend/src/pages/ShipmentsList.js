@@ -111,7 +111,7 @@ function flattenShipment(r) {
     "Box Size":         safe(p.part_box_size ?? p.box_size),
     "No of Boxes":      safeN(p.part_no_of_boxes ?? p.no_of_boxes ?? p.boxes),
     "Net Wt / Unit":    safeN(p.netWtPerUnit ?? p.part_net_unit ?? p.net_wt_unit ?? p.netWTPerUnit ?? p.netWeightPerUnit ?? p.net_wt_per_unit ?? p.net_wt),
-    "Total Net Wt (Part)": safeN(p.part_total_net_wt ?? p.total_net_wt),
+   "Total Net Wt (Part)": safeN(p.part_total_net_wt ?? p.total_net_wt ?? ((Number(p.quantity || 0)) * (Number(p.net_wt_per_unit || 0))) || null),
     "Gross Wt (Part)":  safeN(p.part_gross ?? p.gross_wt ?? p.gross_weight),
   }));
 }

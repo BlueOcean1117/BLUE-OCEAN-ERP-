@@ -7,8 +7,17 @@ const XLSX = require('xlsx');
 function normalize(data) {
   const out = { ...data };
 
+  // String fields that must never be converted to null — an empty string here
+  // means "user left it blank this time"; null would overwrite a previously
+  // saved value via Object.assign(doc, data) in updateShipment.
+  const preserveStrings = new Set([
+    "sb_no", "bl_no", "pol", "container_no",
+    "notify_email", "email_message", "manual_desc",
+    "ff", "invoice_no", "customer", "supplier_name", "enquiry_no",
+  ]);
+
   Object.keys(out).forEach((k) => {
-    if (out[k] === "") out[k] = null;
+    if (out[k] === "" && !preserveStrings.has(k)) out[k] = null;
   });
 
   // Ensure sanitization handles both single properties and new array configurations
@@ -74,6 +83,7 @@ exports.fetchDashboardSummary = async (req, res) => {
 exports.addShipment = async (req, res) => {
   try {
     const data = normalize(req.body);
+    console.log("[addShipment] sb_no:", data.sb_no, "| sb_date:", data.sb_date, "| final_delivery_date:", data.final_delivery_date);
 
     if (data.part_no && data.part_desc) {
       await part.updateOne(
@@ -141,6 +151,7 @@ exports.updateShipment = async (req, res) => {
     }
 
     const data = normalize(req.body);
+    console.log("[updateShipment] sb_no:", data.sb_no, "| sb_date:", data.sb_date, "| final_delivery_date:", data.final_delivery_date);
     const doc = await shipment.findById(id);
     
     if (!doc) {
@@ -194,7 +205,8 @@ exports.updateShipment = async (req, res) => {
     if (data.total_no_of_boxes !== undefined) data.total_no_of_boxes = Number(data.total_no_of_boxes);
 
     Object.assign(doc, data);
-    await doc.save(); // Invokes pre-save hook for totals recalculation
+    await doc.save();
+    console.log("[updateShipment] saved — sb_no:", doc.sb_no, "| sb_date:", doc.sb_date, "| final_delivery_date:", doc.final_delivery_date);
 
     res.json({ success: true, shipment: doc });
   } catch (err) {
@@ -400,6 +412,9 @@ exports.fetchAllShipments = async (req, res) => {
           incoterm: 1,
           mode: 1,
           etd: 1,
+          sb_no: 1,
+          sb_date: 1,
+          final_delivery_date: 1,
           bl_no: 1,
           container_no: 1,
           pol: 1,

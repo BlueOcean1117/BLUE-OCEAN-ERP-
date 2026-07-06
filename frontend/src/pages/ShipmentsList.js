@@ -630,7 +630,7 @@ export default function ShipmentsList() {
       {/* ── SEARCH ── */}
       <div className="search-bar">
         <input
-          placeholder="Search by Enquiry / Part No / BL No / Supplier / Customer/ Part No / Mode "
+          placeholder="Search by Enquiry / Part No / BL No / Supplier / Customer / Mode "
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

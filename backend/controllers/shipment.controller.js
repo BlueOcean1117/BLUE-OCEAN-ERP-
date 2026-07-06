@@ -390,8 +390,9 @@ exports.fetchAllShipments = async (req, res) => {
         { customer: { $regex: req.query.search, $options: "i" } },
         { bl_no: { $regex: req.query.search, $options: "i" } },
         // ✅ NEW — added Invoice No so the search bar can also match invoice_no
-    { invoice_no:    { $regex: req.query.search, $options: "i" } },
-         { "parts.part_no": { $regex: req.query.search, $options: "i" } }
+        { invoice_no:    { $regex: req.query.search, $options: "i" } },
+         { "parts.part_no": { $regex: req.query.search, $options: "i" } },
+          { mode: { $regex: req.query.search, $options: "i" } }
       ];
     }
 

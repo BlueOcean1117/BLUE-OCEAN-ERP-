@@ -724,8 +724,8 @@ export default function ShipmentsList() {
                 <td>{safe(r.incoterm)}</td>
                 <td><span className={`badge ${r.mode?.toLowerCase()}`}>{r.mode}</span></td>
 
-                {/* Parts cell */}
-                <td colSpan={2} style={{ verticalAlign: "top", padding: "4px 6px" }}>
+               {/* Parts cell */}
+                <td colSpan={2} style={{ verticalAlign: "top", padding: "4px 6px", width: "1%", whiteSpace: "nowrap" }}>
                   {r.parts && r.parts.length > 0
                     ? r.parts.map((p, i) => (
                         <div key={i} style={{
@@ -733,7 +733,7 @@ export default function ShipmentsList() {
                           padding: "3px 6px",
                           marginBottom: i < r.parts.length - 1 ? 3 : 0,
                           background: i % 2 === 0 ? "#f8f9ff" : "#fff",
-                          border: "1px solid #e3e8f0", borderRadius: 6, minWidth: 280,
+                          border: "1px solid #e3e8f0", borderRadius: 6, width: "fit-content", minWidth: 0,
                         }}>
                           <span style={{
                             minWidth: 15, height: 15, borderRadius: "50%",

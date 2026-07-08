@@ -495,17 +495,8 @@ export default function ShipmentsList() {
         <div className="sml-grid-3">
           {[
             { label: "Enquiry No",   value: selectedLog.enquiry_no,   hl: true },
-            { label: "Status",       value: selectedLog.status },
-            { label: "Mode",         value: selectedLog.mode },
-            { label: "Invoice No",   value: selectedLog.invoice_no },
-            { label: "Invoice Date", value: fmt(selectedLog.invoice_date) },
-            { label: "Incoterm",     value: selectedLog.incoterm },
-            { label: "FF",           value: selectedLog.ff },
-            { label: "Supplier",     value: selectedLog.supplier_name },
-            { label: "Customer",     value: selectedLog.customer },
             { label: "SB No",        value: selectedLog.sb_no },
             { label: "SB Date",      value: fmt(selectedLog.sb_date) },
-            { label: "Manual Desc",  value: selectedLog.manual_desc },
           ].map(({ label, value, hl }) => (
             <div className="sml-cell" key={label}>
               <div className="sml-cell__label">{label}</div>
@@ -525,9 +516,6 @@ export default function ShipmentsList() {
           {[
             { label: "ETD",          value: fmt(selectedLog.etd) },
             { label: "Final Delivery", value: fmt(selectedLog.final_delivery_date) },
-            { label: "BL No",        value: selectedLog.bl_no },
-            { label: "Container No", value: selectedLog.container_no },
-            { label: "POL",          value: selectedLog.pol },
           ].map(({ label, value }) => (
             <div className="sml-cell" key={label}>
               <div className="sml-cell__label">{label}</div>

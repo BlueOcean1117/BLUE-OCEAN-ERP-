@@ -129,20 +129,74 @@ exports.addShipment = async (req, res) => {
     if (data.total_net_wt   !== undefined) data.total_net_wt   = Number(data.total_net_wt);
     if (data.total_gross_wt !== undefined) data.total_gross_wt = Number(data.total_gross_wt);
     if (data.total_no_of_boxes !== undefined) data.total_no_of_boxes = Number(data.total_no_of_boxes);
+// ──────────────────────────────────────────────────────────────────
+    // ✅ DUPLICATE-SAVE FIX (Task 1)
+    // ----------------------------------------------------------------
+    // WHY: Previously this handler ALWAYS ran shipment.create(), so every
+    // click of "Save Shipment" — including accidental double-clicks or a
+    // resubmit of the same form — inserted a brand-new document.
+    //
+    // FIX: We now treat enquiry_no (the shipment's existing unique
+    // business identifier — already relied on elsewhere in this file for
+    // bulk-upload de-duplication and auto-numbering) as the "does this
+    // shipment already exist?" check:
+    //   - If a shipment with this enquiry_no already exists → UPDATE it
+    //     in place (upsert-style) instead of inserting a duplicate.
+    //   - If it doesn't exist yet → insert it, exactly as before.
+    //
+    // We intentionally reuse the exact same `doc.save()` pattern already
+    // used in updateShipment() (Object.assign + save) rather than
+    // Model.findOneAndUpdate(), because the schema's pre("save") hook
+    // (totals calculation) only fires on .save(), and we must not change
+    // any existing calculation logic. This keeps 100% of the existing
+    // business logic identical — only the insert-vs-update decision
+    // changes.
+    // ──────────────────────────────────────────────────────────────────
+    let result;
 
-    const result = await shipment.create({
-      ...data,
-      status: "ACTIVE",
-      delivery_status: "IN_PROCESS",
-    });
+    if (data.enquiry_no) {
+      const existing = await shipment.findOne({ enquiry_no: data.enquiry_no });
+
+      if (existing) {
+        // Shipment already exists for this enquiry_no → UPDATE, don't insert.
+        Object.assign(existing, data);
+        result = await existing.save();
+      } else {
+        // First time saving this enquiry_no → normal insert.
+        result = await shipment.create({
+          ...data,
+          status: "ACTIVE",
+          delivery_status: "IN_PROCESS",
+        });
+      }
+    } else {
+      // No enquiry_no on payload (shouldn't normally happen since it's
+      // auto-generated) — fall back to original create() behaviour so
+      // nothing that worked before is broken.
+      result = await shipment.create({
+        ...data,
+        status: "ACTIVE",
+        delivery_status: "IN_PROCESS",
+      });
+    }
 
     res.json({ id: result._id.toString() });
   } catch (err) {
+    // A duplicate-key error can still surface here if two requests race
+    // each other at the exact same instant (both pass the findOne check
+    // before either insert completes). The unique index on enquiry_no
+    // (see models/shipment.js) guarantees the DB itself never ends up
+    // with two documents for the same enquiry_no even in that case —
+    // we just surface a clearer message for it instead of a generic 500.
+    if (err && err.code === 11000) {
+      return res.status(409).json({
+        message: "A shipment with this Enquiry No already exists. Please refresh and try again.",
+      });
+    }
     console.error("🔥 MONGO CREATE ERROR 🔥", err);
     res.status(500).json({ message: err.message });
   }
 };
-
 exports.updateShipment = async (req, res) => {
   try {
     const { id } = req.params;

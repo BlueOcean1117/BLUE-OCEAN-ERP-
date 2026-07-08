@@ -112,5 +112,25 @@ ShipmentSchema.pre("save", function (next) {
   next();
 });
 
+/**
+ * 4. Unique Index on the Shipment's business identifier (enquiry_no)
+ * ----------------------------------------------------------------------
+ * WHY: This is the MongoDB-level safety net for Task 1 (Prevent Duplicate
+ * Shipment Records). enquiry_no (a.k.a. QMR No) is already the unique
+ * business identifier used elsewhere in the app (bulk-upload de-dup check
+ * in shipment.controller.js, and the auto-increment logic in
+ * getEnquiryNumber). We simply enforce that uniqueness at the database
+ * layer so that even if application-level logic is ever bypassed
+ * (race condition, direct API call, script, etc.) two shipments can never
+ * be inserted with the same enquiry_no.
+ *
+ * `sparse: true` ensures this does NOT break any existing/legacy documents
+ * that may have a null/missing enquiry_no — the unique constraint only
+ * applies to documents where the field actually has a value.
+ * No other business logic, field, or validation was changed.
+ */
+ShipmentSchema.index({ enquiry_no: 1 }, { unique: true, sparse: true });
+
+
 // Prevent OverwriteModelError
 module.exports = mongoose.models.Shipment || mongoose.model("Shipment", ShipmentSchema);

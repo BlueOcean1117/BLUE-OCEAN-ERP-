@@ -1,0 +1,262 @@
+/* ==========================================================================
+   Enquiry table — compact ERP list, fit-to-screen
+   Fixed-width columns (see <colgroup> in EnquiryTable.js) so the table
+   fits within the viewport instead of forcing horizontal scroll. Sticky
+   two-row header, body-only vertical scroll. Presentation-only.
+   ========================================================================== */
+
+.enquiry-table-wrapper {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* ---------- Scroll container ---------- */
+/* Vertical scroll only on desktop/tablet — the table itself now fits the
+   width of this container, so no horizontal scrollbar is needed there. */
+
+.enquiry-table-scroll {
+  max-height: 560px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+.enquiry-table-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.enquiry-table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.enquiry-table-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+.enquiry-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ---------- Table shell ---------- */
+/* table-layout: fixed + the <colgroup> percentage widths in
+   EnquiryTable.js are what make every column fit inside 100% of the
+   container's width, on any normal desktop viewport. */
+
+.enquiry-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  line-height: 1.25;
+  color: #1e293b;
+}
+
+/* ---------- Sticky header rows ---------- */
+
+.enquiry-table thead th {
+  position: sticky;
+  background: #f8fafc;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Row 1: colored section header, pinned to the very top */
+.enquiry-table thead tr.table-section-header th {
+  top: 0;
+  z-index: 3;
+  height: 22px;
+  padding: 4px 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  border-bottom: none;
+}
+
+.enquiry-table thead tr.table-section-header th.section-bo { background: #2554e8; }
+.enquiry-table thead tr.table-section-header th.section-part { background: #7c3aed; }
+.enquiry-table thead tr.table-section-header th.section-po { background: #16a34a; }
+.enquiry-table thead tr.table-section-header th.section-generated { background: #475569; }
+.enquiry-table thead tr.table-section-header th.section-actions { background: #94a3b8; }
+
+/* Row 2: column headings, pinned right below row 1 */
+.enquiry-table thead tr:nth-child(2) th {
+  top: 22px; /* = height of row 1 above */
+  z-index: 2;
+  height: 30px;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  color: #334155;
+  cursor: default;
+}
+
+.enquiry-table thead tr:nth-child(2) th:hover {
+  cursor: pointer;
+  background: #eef2f7;
+}
+
+/* ---------- Body rows ---------- */
+/* Cells wrap instead of clipping with an ellipsis, since fixed-width
+   columns can't grow to fit long text. Most fields (dates, codes,
+   badges) are short enough to stay on one line naturally. */
+
+.enquiry-table tbody td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.enquiry-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+.enquiry-table tbody tr:hover {
+  background: #eef2ff;
+}
+
+.enquiry-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- Badges / inline chips (compact) ---------- */
+
+.cell-badge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #2554e8;
+  background: #eaf0fe;
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.cell-bo-part {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #be185d;
+  background: #fdf2f8;
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.cell-po {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #15803d;
+  background: #f0fdf4;
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.cell-supplier-link {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+/* ---------- Actions column (compact buttons) ---------- */
+
+.actions-cell {
+  display: flex;
+  gap: 3px;
+}
+
+.actions-cell .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.actions-cell .action-btn:hover {
+  background: #f1f5f9;
+}
+
+.actions-cell .action-btn.view:hover {
+  color: #2554e8;
+  border-color: #2554e8;
+}
+
+.actions-cell .action-btn.edit:hover {
+  color: #d97706;
+  border-color: #d97706;
+}
+
+.actions-cell .action-btn.download:hover {
+  color: #16a34a;
+  border-color: #16a34a;
+}
+
+/* ---------- Pagination / footer info bar ---------- */
+
+.enquiry-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+}
+
+.pagination-info {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.pagination-info strong {
+  color: #1e293b;
+}
+
+/* ---------- Small-screen fallback ---------- */
+/* Below ~700px, 13 fixed-width columns become unreadable no matter the
+   font size — revert to a scrollable, natural-width table there. */
+
+@media (max-width: 700px) {
+  .enquiry-table-scroll {
+    max-height: 65vh;
+    overflow-x: auto;
+  }
+
+  .enquiry-table {
+    table-layout: auto;
+    min-width: 900px;
+  }
+
+  .enquiry-table tbody td {
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enquiry-table-scroll {
+    scroll-behavior: auto;
+  }
+
+  .action-btn {
+    transition: none;
+  }
+}

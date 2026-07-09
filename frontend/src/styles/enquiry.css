@@ -1307,7 +1307,7 @@
 }
 
 /* ===========================
-   Loading / Empty
+Loading / Empty
 =========================== */
 .enquiry-loading,
 .enquiry-empty {
@@ -1318,7 +1318,7 @@
 }
 
 /* ===========================
-   Responsive
+Responsive
 =========================== */
 @media (max-width: 1200px) {
   .enquiry-stats {

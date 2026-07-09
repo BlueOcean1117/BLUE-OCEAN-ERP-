@@ -1438,3 +1438,60 @@
 .enquiry-table-scroll::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+/* ==========================================================================
+   Enquiry table — infinite scroll additions
+   Load on top of enquiry-table-compact.css (from the previous redesign).
+   Only adds styling for the new scroll-sentinel/status row and tweaks the
+   pagination bar down to a plain info line (no buttons anymore).
+   ========================================================================== */
+
+.enquiry-scroll-sentinel-row td {
+  text-align: center;
+  padding: 10px 12px;
+  border-bottom: none;
+  background: transparent;
+}
+
+.scroll-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.scroll-status.loading {
+  color: #2554e8;
+}
+
+.scroll-status.loading::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid #c7d7fb;
+  border-top-color: #2554e8;
+  border-radius: 50%;
+  animation: enquiry-spin 0.7s linear infinite;
+}
+
+.scroll-status.end {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+@keyframes enquiry-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Pagination bar is now a plain info line (buttons removed in JS) */
+.enquiry-pagination {
+  justify-content: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-status.loading::before {
+    animation: none;
+  }
+}

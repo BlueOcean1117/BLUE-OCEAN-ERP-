@@ -10,7 +10,44 @@ import CreateEnquiryModal from "../../components/enquiry/CreateEnquiryModal";
 import ViewEnquiryModal from "../../components/enquiry/ViewEnquiryModal";
 import "../../styles/enquiry.css";
 
-const LIMIT = 4;
+/* ============================================================================
+   CHANGES IN THIS FILE (infinite-scroll support)
+   ----------------------------------------------------------------------------
+   Everything below is IDENTICAL to your original EnquiryDashboard.js except
+   for the specific lines marked "// [INFINITE SCROLL]". Nothing about API
+   endpoints, params, filters, sort, view/edit/download, or modals changed.
+
+   1. LIMIT increased from 4 -> 20.
+      Same /enquiry endpoint, same params shape — just asking for a bigger
+      page per request so scrolling doesn't fire a network call every few
+      rows. Pure constant tweak, purely for UX; safe to tune back down.
+
+   2. Added `loadingMore` state, separate from the existing `loading` state.
+      `loading` still means "full-page loader" (first load, or after a
+      filter/sort/create/update reset). `loadingMore` means "fetching the
+      next chunk while scrolling" — used to show a small inline spinner
+      at the bottom of the list instead of blanking the whole table.
+
+   3. fetchEnquiries: same request, but the result is now APPENDED to
+      `enquiries` when page > 1, and REPLACES it when page === 1 — this is
+      what turns "click Next to swap 4 rows" into "scroll to load more
+      rows into the same list."
+
+   4. handleSort now also calls setPage(1), so changing sort restarts the
+      list from the top (replace) instead of appending page-2-sorted-by-X
+      onto page-1-sorted-by-Y. This matches how the old Previous/Next UI
+      behaved (sorting always showed page 1 of the new order).
+
+   5. handleSubmit (create/update) now calls a small resetAndRefetch()
+      helper instead of calling fetchEnquiries() directly, so that after
+      creating/editing an enquiry the list reloads cleanly from the top
+      (page 1) rather than re-appending whatever page you'd scrolled to.
+
+   Nothing else — no new endpoints, no new params, no changed response
+   shape, no changed filter/search/sort logic.
+   ============================================================================ */
+
+const LIMIT = 20; // [INFINITE SCROLL] was 4
 
 export default function EnquiryDashboard() {
   const [stats, setStats] = useState({});
@@ -19,6 +56,7 @@ export default function EnquiryDashboard() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false); // [INFINITE SCROLL]
   const [sortField, setSortField] = useState("");
   const [sortOrder, setSortOrder] = useState("asc");
 
@@ -57,7 +95,14 @@ export default function EnquiryDashboard() {
 
   // Fetch enquiries
   const fetchEnquiries = useCallback(async () => {
-    setLoading(true);
+    // [INFINITE SCROLL] page 1 = full reload (filters/sort/initial),
+    // page > 1 = "load more" triggered by scrolling near the bottom.
+    const isLoadMore = page > 1;
+    if (isLoadMore) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const params = {
         page,
@@ -75,7 +120,11 @@ export default function EnquiryDashboard() {
       };
 
       const res = await API.get("/enquiry", { params });
-      setEnquiries(res.data.enquiries);
+
+      // [INFINITE SCROLL] append on load-more, replace on fresh load
+      setEnquiries((prev) =>
+        page === 1 ? res.data.enquiries : [...prev, ...res.data.enquiries]
+      );
       setTotal(res.data.total);
       setTotalPages(res.data.totalPages);
     } catch (err) {
@@ -83,6 +132,7 @@ export default function EnquiryDashboard() {
       toast.error("Failed to fetch enquiries");
     } finally {
       setLoading(false);
+      setLoadingMore(false); // [INFINITE SCROLL]
     }
   }, [page, filters, sortField, sortOrder]);
 
@@ -109,6 +159,18 @@ export default function EnquiryDashboard() {
       setSortField(field);
       setSortOrder("asc");
     }
+    setPage(1); // [INFINITE SCROLL] restart list from top on re-sort
+  };
+
+  // [INFINITE SCROLL] Reload from page 1 after create/update, even if the
+  // user had already scrolled to a later page — avoids re-appending a
+  // stale page onto the freshly-mutated list.
+  const resetAndRefetch = () => {
+    if (page === 1) {
+      fetchEnquiries();
+    } else {
+      setPage(1);
+    }
   };
 
   // Create / Update
@@ -124,7 +186,7 @@ export default function EnquiryDashboard() {
       }
       setShowCreateModal(false);
       setEditData(null);
-      fetchEnquiries();
+      resetAndRefetch(); // [INFINITE SCROLL] was: fetchEnquiries();
       fetchStats();
       fetchFilterOptions();
     } catch (err) {
@@ -270,6 +332,7 @@ export default function EnquiryDashboard() {
             onEdit={handleEdit}
             onDownload={handleDownload}
             limit={LIMIT}
+            loadingMore={loadingMore} // [INFINITE SCROLL]
           />
         )}
       </div>

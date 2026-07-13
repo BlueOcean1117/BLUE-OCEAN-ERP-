@@ -569,7 +569,7 @@ export default function ShipmentsList() {
                 </div>
                 <div className="sml-total-cell">
                   <div className="sml-total-label">Total Net Wt (Kg)</div>
-                  <div className="sml-total-value">{safeN(selectedLog.total_net_wt ?? selectedLog.total_net_weight)}</div>
+                 <div className="sml-total-value">{fmtNetWt(selectedLog.total_net_wt ?? selectedLog.total_net_weight)}</div>
                 </div>
                 <div className="sml-total-cell">
                   <div className="sml-total-label">Total Gross Wt (Kg)</div>

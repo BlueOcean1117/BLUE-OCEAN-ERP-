@@ -16,6 +16,12 @@ const fmtDate = (d) => {
 };
 const safe  = (v) => (v ?? "N/A");
 const safeN = (v, fb = 0) => (v != null ? v : fb);
+const fmtNetWt = (v) => {
+  const n = Number(v);
+  if (v == null || Number.isNaN(n)) return safeN(v);
+  const rounded = Number(n.toFixed(1)); // e.g. 4491.9993 -> 4492
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+};
 
 // ─── Auto-calculate delivery status from dates ────────────────────────────
 function calcDeliveryStatus(shipment) {

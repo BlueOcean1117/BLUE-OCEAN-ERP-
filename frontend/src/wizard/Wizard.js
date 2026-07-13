@@ -87,6 +87,7 @@ export default function Wizard({ id }) {
   // without location.state (e.g. page refresh or direct link).
    const [saving, setSaving]     = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+   const [formKey, setFormKey]   = useState(0);
   useEffect(() => {
     if (!id) return;                                      // create mode — nothing to fetch
     if (Object.keys(editData).length > 0) {
@@ -144,8 +145,10 @@ export default function Wizard({ id }) {
           { headers: { "Content-Type": "application/json" } },
         );
         alert("Shipment created successfully ✔️");
-         setJustSaved(true);
-         navigate("/shipments");
+        setData({});
+        setStep(1);
+        setJustSaved(false);
+        setFormKey((k) => k + 1);
       }
 
       console.log("Server response:", res.data);
@@ -215,7 +218,7 @@ export default function Wizard({ id }) {
             <>
               {/* Step1 contains shipment details + tracking + email (merged Step2) */}
               {step === 1 && (
-                <Step1 initial={data} onNext={() => setStep(2)} onUpdate={update} />
+                <Step1 key={formKey} initial={data} onNext={() => setStep(2)} onUpdate={update} />
               )}
 
               {/* Step4 is step 2 in the wizard (Review & Save) */}

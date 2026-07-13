@@ -755,7 +755,7 @@ export default function ShipmentsList() {
                 </td>
 
                 <td>{safeN(r.total_no_of_boxes)}</td>
-                <td>{safeN(r.total_net_wt ?? r.total_net_weight ?? r.net_wt)}</td>
+                <td>{fmtNetWt(r.total_net_wt ?? r.total_net_weight ?? r.net_wt)}</td>
                 <td>{safeN(r.total_gross_wt ?? r.total_gross_weight ?? r.gross_wt)}</td>
                 <td>{fmt(r.etd)}</td>
                 <td>{safe(r.bl_no)}</td>

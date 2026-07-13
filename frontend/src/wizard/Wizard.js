@@ -85,6 +85,8 @@ export default function Wizard({ id }) {
   // ── PREFILL FIX: if id exists but state is empty, fetch from backend ─────
   // This covers the case where the user lands directly on /shipment/edit/:id
   // without location.state (e.g. page refresh or direct link).
+   const [saving, setSaving]     = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
   useEffect(() => {
     if (!id) return;                                      // create mode — nothing to fetch
     if (Object.keys(editData).length > 0) {
@@ -115,10 +117,11 @@ export default function Wizard({ id }) {
      SAVE SHIPMENT (CREATE / EDIT)
      ========================== */
   async function saveFinal() {
+     if (saving || justSaved) return;
     console.log("saveFinal called");
     console.log("Shipment ID:", id);
     console.log("Payload:", data);
-
+ setSaving(true);
     try {
       let res;
 
@@ -141,6 +144,8 @@ export default function Wizard({ id }) {
           { headers: { "Content-Type": "application/json" } },
         );
         alert("Shipment created successfully ✔️");
+         setJustSaved(true);
+         navigate("/shipments");
       }
 
       console.log("Server response:", res.data);
@@ -153,9 +158,10 @@ export default function Wizard({ id }) {
       } else {
         alert("Save failed: " + err.message);
       }
-    }
+     } finally {
+      setSaving(false);
   }
-
+  }
   return (
     <>
       <style>{S}</style>

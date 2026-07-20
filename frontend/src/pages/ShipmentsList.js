@@ -23,6 +23,63 @@ const fmtNetWt = (v) => {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 };
 
+// ─── NEW: date-range helpers for ETD / Supplier ETD filters (frontend-only) ─
+function toDayStart(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function getPresetRange(key) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (key === "today") return { start: today, end: today };
+  if (key === "tomorrow") {
+    const t = new Date(today);
+    t.setDate(t.getDate() + 1);
+    return { start: t, end: t };
+  }
+  if (key === "thisWeek") {
+    const day = today.getDay();
+    const start = new Date(today);
+    start.setDate(today.getDate() - day);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { start, end };
+  }
+  if (key === "thisMonth") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { start, end };
+  }
+  return null;
+}
+// Apply a {start,end} range filter (inclusive) to rows on a given date field.
+function filterByRange(list, field, range) {
+  if (!range || (!range.start && !range.end)) return list;
+  return list.filter((r) => {
+    const d = toDayStart(r[field]);
+    if (!d) return false;
+    if (range.start && d < range.start) return false;
+    if (range.end && d > range.end) return false;
+    return true;
+  });
+}
+function sortByDateField(list, field, dir) {
+  if (!dir) return list;
+  const copy = [...list];
+  copy.sort((a, b) => {
+    const da = toDayStart(a[field]);
+    const db = toDayStart(b[field]);
+    if (!da && !db) return 0;
+    if (!da) return 1;   // rows without a date sink to the end
+    if (!db) return -1;
+    return dir === "asc" ? da - db : db - da;
+  });
+  return copy;
+}
+
 // ─── Auto-calculate delivery status from dates ────────────────────────────
 function calcDeliveryStatus(shipment) {
   const today = new Date();
@@ -92,6 +149,7 @@ function flattenShipment(r) {
     "Mode":                safe(r.mode),
     "SB No":               safe(r.sb_no),
     "SB Date":             fmt(r.sb_date),
+    "Supplier ETD":        fmt(r.supplier_etd),
     "ETD":                 fmt(r.etd),
     "Final Delivery Date": fmt(r.final_delivery_date),
     "BL No":               safe(r.bl_no),
@@ -122,6 +180,136 @@ function flattenShipment(r) {
   }));
 }
 
+// ─── NEW: Excel-style column filter popup (used by ETD & Supplier ETD) ─────
+// Purely presentational + local UI state; reports the computed filter back
+// up to the parent via onApply({ start, end, sortDir }) / onReset().
+function ColumnDateFilterPopup({ title, initial, onApply, onReset, onClose }) {
+  const ref = useRef(null);
+  const [checks, setChecks] = useState(() => ({
+    selectAll: !initial,
+    today: false,
+    tomorrow: false,
+    thisWeek: false,
+    thisMonth: false,
+  }));
+  const [from, setFrom] = useState(initial?.rawFrom || "");
+  const [to,   setTo]   = useState(initial?.rawTo   || "");
+  const [sortDir, setSortDir] = useState(initial?.sortDir || null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [onClose]);
+
+  function toggleCheck(key) {
+    setChecks((prev) => {
+      if (key === "selectAll") {
+        return { selectAll: true, today: false, tomorrow: false, thisWeek: false, thisMonth: false };
+      }
+      const next = { ...prev, selectAll: false, [key]: !prev[key] };
+      const anyChecked = next.today || next.tomorrow || next.thisWeek || next.thisMonth;
+      if (!anyChecked) next.selectAll = true;
+      return next;
+    });
+  }
+
+  function handleApply() {
+    // Union of any checked quick presets
+    const presetKeys = ["today", "tomorrow", "thisWeek", "thisMonth"].filter((k) => checks[k]);
+    let presetRange = null;
+    presetKeys.forEach((k) => {
+      const r = getPresetRange(k);
+      if (!r) return;
+      if (!presetRange) presetRange = { ...r };
+      else {
+        if (r.start < presetRange.start) presetRange.start = r.start;
+        if (r.end   > presetRange.end)   presetRange.end   = r.end;
+      }
+    });
+
+    const customStart = from ? toDayStart(from) : null;
+    const customEnd   = to   ? toDayStart(to)   : null;
+
+    let start = null, end = null;
+    if (presetRange && (customStart || customEnd)) {
+      // Intersect preset range with custom range
+      start = customStart && customStart > presetRange.start ? customStart : presetRange.start;
+      end   = customEnd   && customEnd   < presetRange.end   ? customEnd   : presetRange.end;
+    } else if (presetRange) {
+      start = presetRange.start; end = presetRange.end;
+    } else if (customStart || customEnd) {
+      start = customStart; end = customEnd;
+    }
+
+    onApply({ start, end, sortDir, rawFrom: from, rawTo: to });
+  }
+
+  function handleReset() {
+    setChecks({ selectAll: true, today: false, tomorrow: false, thisWeek: false, thisMonth: false });
+    setFrom(""); setTo(""); setSortDir(null);
+    onReset();
+  }
+
+  return (
+    <div className="col-filter-popup" ref={ref}>
+      <div className="col-filter-popup__title">▾ {title}</div>
+
+      <label className="col-filter-popup__check">
+        <input type="checkbox" checked={checks.selectAll} onChange={() => toggleCheck("selectAll")} />
+        Select All
+      </label>
+      <label className="col-filter-popup__check">
+        <input type="checkbox" checked={checks.today} onChange={() => toggleCheck("today")} />
+        Today
+      </label>
+      <label className="col-filter-popup__check">
+        <input type="checkbox" checked={checks.tomorrow} onChange={() => toggleCheck("tomorrow")} />
+        Tomorrow
+      </label>
+      <label className="col-filter-popup__check">
+        <input type="checkbox" checked={checks.thisWeek} onChange={() => toggleCheck("thisWeek")} />
+        This Week
+      </label>
+      <label className="col-filter-popup__check">
+        <input type="checkbox" checked={checks.thisMonth} onChange={() => toggleCheck("thisMonth")} />
+        This Month
+      </label>
+
+      <div className="col-filter-popup__divider" />
+
+      <div className="col-filter-popup__label">Date Range</div>
+      <div className="col-filter-popup__row">
+        <div>
+          <label className="col-filter-popup__sublabel">From</label>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div>
+          <label className="col-filter-popup__sublabel">To</label>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="col-filter-popup__divider" />
+
+      <div className="col-filter-popup__label">Sort</div>
+      <div className="col-filter-popup__sort">
+        <button type="button" className={sortDir === "az" ? "active" : ""} onClick={() => setSortDir(sortDir === "az" ? null : "az")}>A → Z</button>
+        <button type="button" className={sortDir === "za" ? "active" : ""} onClick={() => setSortDir(sortDir === "za" ? null : "za")}>Z → A</button>
+        <button type="button" className={sortDir === "oldest" ? "active" : ""} onClick={() => setSortDir(sortDir === "oldest" ? null : "oldest")}>Oldest → Newest</button>
+        <button type="button" className={sortDir === "newest" ? "active" : ""} onClick={() => setSortDir(sortDir === "newest" ? null : "newest")}>Newest → Oldest</button>
+      </div>
+
+      <div className="col-filter-popup__actions">
+        <button type="button" className="col-filter-popup__apply" onClick={handleApply}>Apply</button>
+        <button type="button" className="col-filter-popup__reset" onClick={handleReset}>Reset</button>
+      </div>
+    </div>
+  );
+}
+
 export default function ShipmentsList() {
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -148,6 +336,16 @@ export default function ShipmentsList() {
 
   // Bulk upload
   const [visibleBulkUploadModal, setVisibleBulkUploadModal] = useState(false);
+
+  // ── NEW: ETD Date Range Filter (top of list) ─────────────────────────────
+  const [etdFromInput, setEtdFromInput] = useState("");
+  const [etdToInput,   setEtdToInput]   = useState("");
+  const [appliedEtdRange, setAppliedEtdRange] = useState(null); // {start,end} | null
+
+  // ── NEW: Excel-style column filters for ETD / Supplier ETD ──────────────
+  const [etdColFilter,         setEtdColFilter]         = useState(null); // {start,end,sortDir,rawFrom,rawTo}
+  const [supplierEtdColFilter, setSupplierEtdColFilter] = useState(null);
+  const [openColPopup, setOpenColPopup] = useState(null); // 'etd' | 'supplier_etd' | null
 
   // ── CHECKBOX SELECTION ───────────────────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false); // checkboxes hidden by default
@@ -238,8 +436,36 @@ export default function ShipmentsList() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { setFilteredRows(rows); }, [rows]);
+  // ── NEW: apply ETD range (top bar) + Excel-style column filters/sorts ────
+  // Operates purely on the already-loaded `rows` data — no API/backend calls.
+  useEffect(() => {
+    let out = rows;
+    out = filterByRange(out, "etd", appliedEtdRange);
+    out = filterByRange(out, "etd", etdColFilter);
+    out = filterByRange(out, "supplier_etd", supplierEtdColFilter);
+
+    // Whichever column filter has an active sort applies last (most recent Apply wins
+    // between the two columns isn't tracked separately — Supplier ETD sort takes
+    // precedence if both are set, since it's evaluated second).
+    const dirMap = { az: "asc", za: "desc", oldest: "asc", newest: "desc" };
+    if (etdColFilter?.sortDir) out = sortByDateField(out, "etd", dirMap[etdColFilter.sortDir]);
+    if (supplierEtdColFilter?.sortDir) out = sortByDateField(out, "supplier_etd", dirMap[supplierEtdColFilter.sortDir]);
+
+    setFilteredRows(out);
+  }, [rows, appliedEtdRange, etdColFilter, supplierEtdColFilter]);
   useEffect(() => { fetchAll(); }, [page, pageSize, search]);
+
+  // ── NEW: ETD range filter bar handlers ───────────────────────────────────
+  function applyEtdRangeFilter() {
+    if (!etdFromInput && !etdToInput) { setAppliedEtdRange(null); return; }
+    setAppliedEtdRange({
+      start: etdFromInput ? toDayStart(etdFromInput) : null,
+      end:   etdToInput   ? toDayStart(etdToInput)   : null,
+    });
+  }
+  function clearEtdRangeFilter() {
+    setEtdFromInput(""); setEtdToInput(""); setAppliedEtdRange(null);
+  }
 
   // ── STATUS UPDATE ─────────────────────────────────────────────────────────
   async function updateStatus(id, status) {
@@ -330,7 +556,7 @@ export default function ShipmentsList() {
       doc.setFontSize(8.5);
       const meta = [
         `Invoice: ${safe(r.invoice_no)}`, `Invoice Date: ${fmt(r.invoice_date)}`,
-        `Incoterm: ${safe(r.incoterm)}`,  `ETD: ${fmt(r.etd)}`,
+        `Incoterm: ${safe(r.incoterm)}`,  `Supplier ETD: ${fmt(r.supplier_etd)}`, `ETD: ${fmt(r.etd)}`,
         `BL No: ${safe(r.bl_no)}`,        `Container: ${safe(r.container_no)}`,
         `POL: ${safe(r.pol)}`,            `SB No: ${safe(r.sb_no)}`,
         `Final Delivery: ${fmt(r.final_delivery_date)}`,
@@ -403,7 +629,7 @@ export default function ShipmentsList() {
     <div className="shipments-page">
       {/* ── HEADER ── */}
       <div className="shipments-header">
-        <div>
+        <div className="shipments-header__left">
           <h2>Shipments List</h2>
           <div className="backend-status">
             Backend:
@@ -415,42 +641,60 @@ export default function ShipmentsList() {
           </div>
         </div>
 
-        <div className="actions">
-          {/* Export all — always visible */}
-          <button className="btn excel" onClick={() => exportExcel(false)}>Export Excel</button>
-          <button className="btn pdf"   onClick={() => exportPDF(false)}>Export PDF</button>
+        <div className="shipments-header__right">
+          <div className="header-controls-row">
+            {/* ── ETD DATE RANGE FILTER (compact, single line, moved into header) ── */}
+            <div className="etd-range-bar etd-range-bar--in-header">
+              <div className="etd-range-bar__field">
+                <label>ETD From</label>
+                <input type="date" value={etdFromInput} onChange={(e) => setEtdFromInput(e.target.value)} />
+              </div>
+              <div className="etd-range-bar__field">
+                <label>ETD To</label>
+                <input type="date" value={etdToInput} onChange={(e) => setEtdToInput(e.target.value)} />
+              </div>
+              <button className="btn etd-range-bar__apply" onClick={applyEtdRangeFilter}>Apply</button>
+              <button className="btn etd-range-bar__clear" onClick={clearEtdRangeFilter}>Clear</button>
+            </div>
 
-          {/* Toggle selection mode */}
-          <button
-            className={`btn select-toggle ${selectionMode ? "select-toggle--active" : ""}`}
-            onClick={toggleSelectionMode}
-          >
-            {selectionMode ? "✕ Cancel Selection" : "☑ Select Shipments"}
-          </button>
+            <div className="actions">
+              {/* Export all — always visible */}
+              <button className="btn excel" onClick={() => exportExcel(false)}>Export Excel</button>
+              <button className="btn pdf"   onClick={() => exportPDF(false)}>Export PDF</button>
 
-          {/* Export selected — only visible when selection mode is ON */}
-          {selectionMode && (
-            <>
+              {/* Toggle selection mode */}
               <button
-                className="btn excel-sel"
-                style={{ opacity: selected.size > 0 ? 1 : 0.55 }}
-                onClick={() => exportExcel(true)}
+                className={`btn select-toggle ${selectionMode ? "select-toggle--active" : ""}`}
+                onClick={toggleSelectionMode}
               >
-                Export Excel {selected.size > 0 ? `(${selected.size})` : ""}
+                {selectionMode ? "✕ Cancel Selection" : "☑ Select Shipments"}
               </button>
-              <button
-                className="btn pdf-sel"
-                style={{ opacity: selected.size > 0 ? 1 : 0.55 }}
-                onClick={() => exportPDF(true)}
-              >
-                Export PDF {selected.size > 0 ? `(${selected.size})` : ""}
-              </button>
-            </>
-          )}
 
-          <button className="btn upload" onClick={() => setVisibleBulkUploadModal(true)}>
-            Upload Bulk
-          </button>
+              {/* Export selected — only visible when selection mode is ON */}
+              {selectionMode && (
+                <>
+                  <button
+                    className="btn excel-sel"
+                    style={{ opacity: selected.size > 0 ? 1 : 0.55 }}
+                    onClick={() => exportExcel(true)}
+                  >
+                    Export Excel {selected.size > 0 ? `(${selected.size})` : ""}
+                  </button>
+                  <button
+                    className="btn pdf-sel"
+                    style={{ opacity: selected.size > 0 ? 1 : 0.55 }}
+                    onClick={() => exportPDF(true)}
+                  >
+                    Export PDF {selected.size > 0 ? `(${selected.size})` : ""}
+                  </button>
+                </>
+              )}
+
+              <button className="btn upload" onClick={() => setVisibleBulkUploadModal(true)}>
+                Upload Bulk
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -521,6 +765,7 @@ export default function ShipmentsList() {
         <div className="sml-grid-3">
           {[
             { label: "ETD",          value: fmt(selectedLog.etd) },
+            { label: "Supplier ETD", value: fmt(selectedLog.supplier_etd) },
             { label: "Final Delivery", value: fmt(selectedLog.final_delivery_date) },
           ].map(({ label, value }) => (
             <div className="sml-cell" key={label}>
@@ -671,7 +916,34 @@ export default function ShipmentsList() {
               <th>Total Boxes</th>
               <th>Total Net Wt</th>
               <th>Total Gross Wt</th>
-              <th>ETD</th>
+              <th className="col-filterable">
+                <span className="col-filterable__label" onClick={() => setOpenColPopup(openColPopup === "supplier_etd" ? null : "supplier_etd")}>
+                  Supplier ETD <span className="col-filter-icon">▾</span>
+                </span>
+                {openColPopup === "supplier_etd" && (
+                  <ColumnDateFilterPopup
+                    title="Supplier ETD"
+                    initial={supplierEtdColFilter}
+                    onApply={(cfg) => { setSupplierEtdColFilter(cfg); setOpenColPopup(null); }}
+                    onReset={() => { setSupplierEtdColFilter(null); setOpenColPopup(null); }}
+                    onClose={() => setOpenColPopup(null)}
+                  />
+                )}
+              </th>
+              <th className="col-filterable">
+                <span className="col-filterable__label" onClick={() => setOpenColPopup(openColPopup === "etd" ? null : "etd")}>
+                  ETD <span className="col-filter-icon">▾</span>
+                </span>
+                {openColPopup === "etd" && (
+                  <ColumnDateFilterPopup
+                    title="ETD"
+                    initial={etdColFilter}
+                    onApply={(cfg) => { setEtdColFilter(cfg); setOpenColPopup(null); }}
+                    onReset={() => { setEtdColFilter(null); setOpenColPopup(null); }}
+                    onClose={() => setOpenColPopup(null)}
+                  />
+                )}
+              </th>
               <th>BL No</th>
               <th>Container No</th>
               <th>POL</th>
@@ -757,6 +1029,7 @@ export default function ShipmentsList() {
                 <td>{safeN(r.total_no_of_boxes)}</td>
                 <td>{fmtNetWt(r.total_net_wt ?? r.total_net_weight ?? r.net_wt)}</td>
                 <td>{safeN(r.total_gross_wt ?? r.total_gross_weight ?? r.gross_wt)}</td>
+                <td>{fmt(r.supplier_etd)}</td>
                 <td>{fmt(r.etd)}</td>
                 <td>{safe(r.bl_no)}</td>
                 <td>{safe(r.container_no)}</td>

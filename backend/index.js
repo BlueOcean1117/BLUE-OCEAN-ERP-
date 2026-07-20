@@ -8,7 +8,8 @@ const partRoutes = require("./routes/part.route");
 const fileRoutes = require("./routes/file.route");
 const notificationRoutes = require("./routes/notification.route");
 const enquiryRoutes = require("./routes/enquiry.route");
-
+const authRoutes = require("./routes/auth.route");
+const adminRoutes = require("./routes/admin.route");
 // const cookieParser = require("cookie-parser");
 const fileUpload = require("express-fileupload");
 const cors = require("cors");
@@ -47,7 +48,8 @@ app.use("/api/v1/files", fileRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/v1/notification", notificationRoutes);
 app.use("/api/v1/enquiry", enquiryRoutes);
-
+  app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/admin", adminRoutes);
 
 // Testing the server
 app.get("/", (req, res) => {

@@ -2,6 +2,12 @@
 // ⚠️  Place this file at: src/wizard/steps/Step1.js
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import API from "../../services/api"; // resolves to src/services/api
+// NEW — Smart Part Number Auto-Suggestion (sourced from Shipment History,
+// separate from the existing part_master autocomplete below). See:
+//   ./useShipmentPartHistory.js   — builds the suggestion index
+//   ./SmartPartSuggestPopup.js    — renders the popup UI
+import useShipmentPartHistory from "./useShipmentPartHistory";
+import SmartPartSuggestPopup from "./SmartPartSuggestPopup";
 
 const INCOTERMS = ["DAP", "EXW", "CIF", "CIP", "CFR", "CPT", "DAT", "DDP", "FAS", "FCA", "FOB"];
 
@@ -123,6 +129,7 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
       sb_no:               raw.sb_no           ?? raw.sbNo           ?? raw.shipping_bill_no ?? "",
       sb_date:             toDateInput(raw.sb_date         ?? raw.sbDate         ?? raw.shipping_bill_date),
       etd:                 toDateInput(raw.etd             ?? ""),
+      supplier_etd:        toDateInput(raw.supplier_etd    ?? raw.supplierEtd    ?? ""),
       final_delivery_date: toDateInput(raw.final_delivery_date ?? raw.finalDeliveryDate ?? raw.eta ?? ""),
       bl_no:               raw.bl_no           ?? raw.blNo           ?? raw.bl_number ?? "",
       container_no:        raw.container_no    ?? raw.containerNo    ?? raw.container_number ?? "",
@@ -169,6 +176,7 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
       label_files: [],
       label_urls: [],
       etd: "",
+      supplier_etd: "",
       final_delivery_date: "",
       bl_no: "",
       container_no: "",
@@ -201,6 +209,20 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
 
   const dropdownRefs = useRef([]);
   const lastInitialRef = useRef(null);
+
+  // ── NEW: Smart Part Number Suggestions (Shipment History source) ────────
+  // Fully separate from partAC/partSuppliers above — the existing
+  // part_master autocomplete is left completely untouched.
+  const shipmentHistory = useShipmentPartHistory();
+  const [smartAC, setSmartAC] = useState(() =>
+    (Array.isArray(initial.parts) && initial.parts.length > 0 ? initial.parts : [{}]).map(() => ({
+      results: [],
+      activeIndex: -1,
+      show: false,
+    }))
+  );
+  const smartDebounceRefs = useRef([]);
+  const smartDropdownRefs = useRef([]);
 
   // ── PREFILL FIX: sync incoming initial data into form (edit mode) ────────
   useEffect(() => {
@@ -238,6 +260,7 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
       label_files: [],
       label_urls: [],
       etd: "",
+      supplier_etd: "",
       final_delivery_date: "",
       bl_no: "",
       container_no: "",
@@ -261,6 +284,9 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     );
 
     setPartSuppliers(incomingParts.map(() => []));
+
+    // NEW — keep the smart-suggestion popup state array aligned with parts
+    setSmartAC(incomingParts.map(() => ({ results: [], activeIndex: -1, show: false })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?._id ?? initial?.enquiry_no ?? JSON.stringify(initial)]);
   // ↑ Depend on a stable ID/key, not the object reference.
@@ -281,6 +307,25 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // NEW — Close the Smart (Shipment History) suggestion popup on outside click.
+  // Independent of the effect above; does not alter its behavior.
+  useEffect(() => {
+    function handleSmartClick(e) {
+      smartDropdownRefs.current.forEach((ref, i) => {
+        if (ref && !ref.contains(e.target)) {
+          setSmartAC((prev) => {
+            if (!prev[i] || !prev[i].show) return prev;
+            const next = [...prev];
+            next[i] = { ...next[i], show: false };
+            return next;
+          });
+        }
+      });
+    }
+    document.addEventListener("mousedown", handleSmartClick);
+    return () => document.removeEventListener("mousedown", handleSmartClick);
   }, []);
 
   // ── Auto-fetch enquiry number on Create mode only ───────────────────────
@@ -366,6 +411,125 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     }
   }, []);
 
+  // ── NEW: Smart (Shipment History) suggestion search — debounced 250ms ───
+  const runSmartSearch = useCallback(
+    (index, query) => {
+      if (!query || query.trim().length === 0) {
+        setSmartAC((prev) => {
+          const next = [...prev];
+          next[index] = { results: [], activeIndex: -1, show: false };
+          return next;
+        });
+        return;
+      }
+      const results = shipmentHistory.search(query);
+      setSmartAC((prev) => {
+        const next = [...prev];
+        next[index] = { results, activeIndex: results.length ? 0 : -1, show: results.length > 0 };
+        return next;
+      });
+    },
+    [shipmentHistory]
+  );
+
+  const scheduleSmartSearch = useCallback(
+    (index, query) => {
+      if (smartDebounceRefs.current[index]) {
+        clearTimeout(smartDebounceRefs.current[index]);
+      }
+      smartDebounceRefs.current[index] = setTimeout(() => {
+        runSmartSearch(index, query);
+      }, 250);
+    },
+    [runSmartSearch]
+  );
+
+  // NEW — Auto-fill the current row ONLY from a Shipment-History suggestion.
+  // Never touches other part rows; every field remains editable afterward
+  // since these are plain controlled inputs (no readOnly is added here).
+  const selectSmartSuggestion = useCallback(
+    (index, r) => {
+      setForm((prev) => {
+        const updatedParts = [...prev.parts];
+        const qty = r.part_qty !== "" && r.part_qty !== undefined ? Number(r.part_qty) : updatedParts[index].part_qty;
+        const netUnit =
+          r.part_net_unit !== "" && r.part_net_unit !== undefined
+            ? Number(r.part_net_unit)
+            : updatedParts[index].part_net_unit;
+        updatedParts[index] = {
+          ...updatedParts[index],
+          part_no: r.part_no ?? updatedParts[index].part_no,
+          part_desc: r.part_desc ?? updatedParts[index].part_desc,
+          part_qty: qty,
+          part_box_size: r.part_box_size || updatedParts[index].part_box_size,
+          part_no_of_boxes:
+            r.part_no_of_boxes !== "" && r.part_no_of_boxes !== undefined
+              ? r.part_no_of_boxes
+              : updatedParts[index].part_no_of_boxes,
+          part_net_unit: netUnit,
+          part_gross:
+            r.part_gross !== "" && r.part_gross !== undefined ? r.part_gross : updatedParts[index].part_gross,
+          part_total_net_wt: (Number(qty || 0) * Number(netUnit || 0)).toFixed(2),
+        };
+        return { ...prev, parts: updatedParts };
+      });
+
+      // keep the existing part_master autocomplete's own query text in sync
+      // so the input displays the selected part number (does not alter its logic)
+      setPartAC((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], query: r.part_no, showDropdown: false, suggestions: [] };
+        return next;
+      });
+
+      setSmartAC((prev) => {
+        const next = [...prev];
+        next[index] = { results: [], activeIndex: -1, show: false };
+        return next;
+      });
+    },
+    []
+  );
+
+  // NEW — Keyboard navigation for the Smart suggestion popup: ↑ ↓ Enter Esc.
+  // Only acts when the smart popup is open; otherwise does nothing, so it
+  // never interferes with normal typing or the existing dropdown's own
+  // (mouse-only) interaction.
+  const handlePartNoKeyDown = (index, e) => {
+    const smart = smartAC[index];
+    if (!smart || !smart.show || smart.results.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSmartAC((prev) => {
+        const next = [...prev];
+        const cur = next[index];
+        next[index] = { ...cur, activeIndex: (cur.activeIndex + 1) % cur.results.length };
+        return next;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSmartAC((prev) => {
+        const next = [...prev];
+        const cur = next[index];
+        next[index] = { ...cur, activeIndex: (cur.activeIndex - 1 + cur.results.length) % cur.results.length };
+        return next;
+      });
+    } else if (e.key === "Enter") {
+      if (smart.activeIndex >= 0 && smart.results[smart.activeIndex]) {
+        e.preventDefault();
+        selectSmartSuggestion(index, smart.results[smart.activeIndex]);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSmartAC((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], show: false };
+        return next;
+      });
+    }
+  };
+
   // ── Select suggestion from autocomplete dropdown ─────────────────────────
   const selectPartSuggestion = useCallback(
     (index, suggestion) => {
@@ -400,7 +564,7 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     setForm((prev) => ({ ...prev, parts: updatedParts }));
   };
 
-  // ── Part number input (drives autocomplete) ──────────────────────────────
+  // ── Part number input (drives Smart/Shipment-History suggestions only) ──
   const handlePartNoInput = (index, e) => {
     const value = e.target.value;
     setPartAC((prev) => {
@@ -411,7 +575,16 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     const updatedParts = [...form.parts];
     updatedParts[index] = { ...updatedParts[index], part_no: value };
     setForm((prev) => ({ ...prev, parts: updatedParts }));
-    searchPartNumber(index, value);
+    scheduleSmartSearch(index, value); // Shipment History suggestions
+  };
+
+  // ── Part description input (drives the existing part_master autocomplete) ─
+  const handlePartDescInput = (index, e) => {
+    const value = e.target.value;
+    const updatedParts = [...form.parts];
+    updatedParts[index] = { ...updatedParts[index], part_desc: value };
+    setForm((prev) => ({ ...prev, parts: updatedParts }));
+    searchPartNumber(index, value); // existing part_master search — untouched
   };
 
   const addPart = () => {
@@ -421,12 +594,14 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
     }));
     setPartAC((prev) => [...prev, { query: "", suggestions: [], loading: false, showDropdown: false }]);
     setPartSuppliers((prev) => [...prev, []]);
+    setSmartAC((prev) => [...prev, { results: [], activeIndex: -1, show: false }]); // NEW
   };
 
   const removePart = (index) => {
     setForm((prev) => ({ ...prev, parts: prev.parts.filter((_, i) => i !== index) }));
     setPartAC((prev) => prev.filter((_, i) => i !== index));
     setPartSuppliers((prev) => prev.filter((_, i) => i !== index));
+    setSmartAC((prev) => prev.filter((_, i) => i !== index)); // NEW
   };
 
   // ── Generic top-level field change ──────────────────────────────────────
@@ -553,6 +728,7 @@ ${form.email_message || ""}
 
         {form.parts.map((part, index) => {
           const ac = partAC[index] || { query: "", suggestions: [], loading: false, showDropdown: false };
+          const smart = smartAC[index] || { results: [], activeIndex: -1, show: false }; // NEW
 
           return (
             <div className="part-card" key={index}>
@@ -565,13 +741,50 @@ ${form.email_message || ""}
 
               {/* Part No + Part Desc */}
               <div className="g2">
-                <div className="f" style={{ position: "relative" }} ref={(el) => (dropdownRefs.current[index] = el)}>
+                <div className="f" style={{ position: "relative" }}>
                   <label>Part Number <em>*</em></label>
                   <input
                     name="part_no"
                     value={ac.query !== "" ? ac.query : (part.part_no || "")}
                     onChange={(e) => handlePartNoInput(index, e)}
-                    placeholder="Type to search…"
+                    onKeyDown={(e) => handlePartNoKeyDown(index, e)}
+                    placeholder="Type to search recent shipments…"
+                    autoComplete="off"
+                  />
+
+                  {/* Smart (Shipment History) suggestion popup — drives
+                      Part Number only. The existing part_master dropdown
+                      has moved to the Part Description field below. */}
+                  {smart.show && smart.results.length > 0 && (
+                    <div ref={(el) => (smartDropdownRefs.current[index] = el)}>
+                      <SmartPartSuggestPopup
+                        results={smart.results}
+                        activeIndex={smart.activeIndex}
+                        top={38}
+                        onHover={(i) =>
+                          setSmartAC((prev) => {
+                            const next = [...prev];
+                            next[index] = { ...next[index], activeIndex: i };
+                            return next;
+                          })
+                        }
+                        onSelect={(r) => selectSmartSuggestion(index, r)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="f" style={{ position: "relative" }} ref={(el) => (dropdownRefs.current[index] = el)}>
+                  <label>
+                    Part Description
+                    {part.part_desc && part.part_no && <span className="autofill-tag">✓ Auto-filled</span>}
+                  </label>
+                  <input
+                    name="part_desc"
+                    value={part.part_desc}
+                    onChange={(e) => handlePartDescInput(index, e)}
+                    placeholder="Type to search part master…"
+                    style={part.part_desc && part.part_no ? { background: "#F0FFF4" } : {}}
                     autoComplete="off"
                   />
                   {ac.loading && (
@@ -592,21 +805,8 @@ ${form.email_message || ""}
                     </ul>
                   )}
                 </div>
-
-                <div className="f">
-                  <label>
-                    Part Description
-                    {part.part_desc && part.part_no && <span className="autofill-tag">✓ Auto-filled</span>}
-                  </label>
-                  <input
-                    name="part_desc"
-                    value={part.part_desc}
-                    onChange={(e) => handlePartChange(index, e)}
-                    placeholder="Description"
-                    style={part.part_desc && part.part_no ? { background: "#F0FFF4" } : {}}
-                  />
-                </div>
               </div>
+
 
               {/* Box Size, No. of Boxes, Quantity */}
               <div className="g3">
@@ -747,6 +947,10 @@ ${form.email_message || ""}
           <div className="f">
             <label>ETD (Estimated Time of Departure)</label>
             <input type="date" name="etd" value={form.etd} onChange={change} />
+          </div>
+          <div className="f">
+            <label>Supplier ETD</label>
+            <input type="date" name="supplier_etd" value={form.supplier_etd} onChange={change} />
           </div>
           <div className="f">
             <label>Final Delivery</label>

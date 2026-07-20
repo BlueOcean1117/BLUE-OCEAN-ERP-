@@ -13,8 +13,78 @@
 .shipments-header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  background: #fff;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  flex-wrap: wrap;
+}
+
+/* NEW: header left/right wrappers (title+status on the left,
+   ETD range filter + action buttons on the right, single line) */
+.shipments-header__left {
+  display: flex;
+  flex-direction: column;
+}
+.shipments-header__right {
+  display: flex;
   align-items: center;
-  margin-bottom: 20px;/* ── ADD THESE TO YOUR EXISTING ShipmentsList.css ── */
+}
+
+/* Row holding the compact ETD filter + the export/action buttons together
+   on one line, so the header stays the same height as before. */
+.header-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* NEW: ETD range bar when embedded in the header — same fields/buttons,
+   compacted to a single inline line so it fits beside the action buttons
+   without adding extra height to the header.
+   Uses a compound selector (.etd-range-bar.etd-range-bar--in-header) so it
+   reliably overrides the standalone .etd-range-bar card styling below,
+   regardless of source order. */
+.etd-range-bar.etd-range-bar--in-header {
+  margin: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field {
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  margin: 0;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field input[type="date"] {
+  padding: 3px 5px;
+  font-size: 9px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  width: 92px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__apply,
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__clear {
+  padding: 4px 9px;
+  font-size: 10px;
+  border-radius: 6px;
+}
+/* ── ADD THESE TO YOUR EXISTING ShipmentsList.css ── */
 
 /* Selected row highlight */
 .row-selected td { background: #EFF6FF !important; }
@@ -98,12 +168,6 @@
 .btn.select-toggle--active:hover {
   background: #0F172A;
   border-color: #0F172A;
-}
-  background: #fff;
-  padding: 16px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  flex-wrap: wrap;
 }
 
 .shipments-header h2 {
@@ -364,6 +428,9 @@ tbody tr:hover { background: #f1f5f9; }
 ====================== */
 @media (max-width: 1024px) {
   .shipments-header { flex-direction: column; align-items: flex-start; }
+  .shipments-header__right { width: 100%; }
+  .header-controls-row { justify-content: flex-start; width: 100%; }
+  .etd-range-bar--in-header { flex-wrap: wrap; }
   .actions { width: 100%; justify-content: flex-start; }
   .table-wrap { min-width: 100%; }
 }
@@ -744,4 +811,1171 @@ tbody tr:hover { background: #f1f5f9; }
 @media (max-width: 460px) {
   .sml-grid-3    { grid-template-columns: 1fr; }
   .sml-totals-row { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NEW — ETD Date Range filter bar (top of Shipment List)
+   Additive only; matches existing search-bar / btn visual language.
+   ══════════════════════════════════════════════════════════════════ */
+.etd-range-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0 0 0;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.etd-range-bar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.etd-range-bar__field label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+.etd-range-bar__field input[type="date"] {
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.etd-range-bar__apply {
+  background: #3b82f6;
+  color: #fff;
+}
+.etd-range-bar__clear {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NEW — Excel-style column filter (ETD / Supplier ETD headers)
+   ══════════════════════════════════════════════════════════════════ */
+/* FIX: no longer sets `position: relative` here — that was overriding the
+   `position: sticky` from `thead th` (a class selector beats a plain
+   element selector regardless of source order), which is why only these
+   two header cells scrolled away instead of staying frozen. `position:
+   sticky` on the parent `th` already provides a positioning context for
+   the popup below, so nothing else needs to change. */
+.col-filterable__label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+.col-filter-icon {
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.col-filter-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  color: #1E293B;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  padding: 12px 14px;
+  width: 220px;
+  z-index: 20;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  white-space: normal;
+  cursor: default;
+}
+.col-filter-popup__title {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: #1E293B;
+}
+.col-filter-popup__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+  font-size: 11px;
+  color: #334155;
+}
+.col-filter-popup__divider {
+  border-top: 1px solid #f1f5f9;
+  margin: 8px 0;
+}
+.col-filter-popup__label {
+  font-weight: 600;
+  font-size: 10px;
+  color: #64748B;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.col-filter-popup__sublabel {
+  font-size: 9px;
+  color: #94A3B8;
+  display: block;
+  margin-bottom: 2px;
+}
+.col-filter-popup__row {
+  display: flex;
+  gap: 8px;
+}
+.col-filter-popup__row input[type="date"] {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.col-filter-popup__sort {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.col-filter-popup__sort button {
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 10px;
+  cursor: pointer;
+  color: #334155;
+}
+.col-filter-popup__sort button.active {
+  background: #DBEAFE;
+  border-color: #93C5FD;
+  color: #1E40AF;
+  font-weight: 600;
+}/* ======================
+   PAGE
+====================== */
+.shipments-page {
+  padding: 20px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  background: #f8fafc;
+  min-height: 100vh;
+}
+
+/* HEADER */
+.shipments-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  background: #fff;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  flex-wrap: wrap;
+}
+
+/* NEW: header left/right wrappers (title+status on the left,
+   ETD range filter + action buttons on the right, single line) */
+.shipments-header__left {
+  display: flex;
+  flex-direction: column;
+}
+.shipments-header__right {
+  display: flex;
+  align-items: center;
+}
+
+/* Row holding the compact ETD filter + the export/action buttons together
+   on one line, so the header stays the same height as before. */
+.header-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* NEW: ETD range bar when embedded in the header — same fields/buttons,
+   compacted to a single inline line so it fits beside the action buttons
+   without adding extra height to the header.
+   Uses a compound selector (.etd-range-bar.etd-range-bar--in-header) so it
+   reliably overrides the standalone .etd-range-bar card styling below,
+   regardless of source order. */
+.etd-range-bar.etd-range-bar--in-header {
+  margin: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field {
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  margin: 0;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__field input[type="date"] {
+  padding: 3px 5px;
+  font-size: 9px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  width: 92px;
+}
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__apply,
+.etd-range-bar.etd-range-bar--in-header .etd-range-bar__clear {
+  padding: 4px 9px;
+  font-size: 10px;
+  border-radius: 6px;
+}
+/* ── ADD THESE TO YOUR EXISTING ShipmentsList.css ── */
+
+/* Selected row highlight */
+.row-selected td { background: #EFF6FF !important; }
+
+/* Selection info bar */
+.selection-bar {
+  display: flex; align-items: center; gap: 12px;
+  background: #EFF6FF; border: 1px solid #BFDBFE;
+  border-radius: 8px; padding: 8px 14px;
+  margin-bottom: 10px; font-size: 13px; font-weight: 600; color: #1E40AF;
+}
+.sel-clear {
+  background: none; border: 1px solid #93C5FD;
+  color: #2563EB; border-radius: 6px;
+  padding: 2px 10px; font-size: 12px; cursor: pointer;
+}
+.sel-clear:hover { background: #DBEAFE; }
+
+/* Export Selected buttons */
+.btn.excel-sel {
+  background: #D1FAE5; color: #065F46;
+  border: 1px solid #6EE7B7;
+}
+.btn.excel-sel:hover { background: #A7F3D0; }
+.btn.pdf-sel {
+  background: #FEE2E2; color: #991B1B;
+  border: 1px solid #FCA5A5;
+}
+.btn.pdf-sel:hover { background: #FECACA; }
+
+/* Modal info grid */
+.modal-info-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px 20px; margin-bottom: 16px;
+}
+.modal-info-row {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 0; border-bottom: 1px solid #F1F5F9;
+}
+.modal-info-label { font-size: 10px; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.4px; }
+.modal-info-value { font-size: 13px; font-weight: 600; color: #1E293B; }
+
+/* Modal parts table */
+.modal-parts-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.modal-parts-table th {
+  background: #1E293B; color: #fff;
+  padding: 7px 10px; text-align: left;
+  font-size: 11px; font-weight: 600;
+}
+.modal-parts-table td {
+  padding: 7px 10px; border-bottom: 1px solid #F1F5F9; color: #374151;
+}
+.modal-parts-table tr:nth-child(even) td { background: #F8FAFC; }
+.modal-parts-table tr:last-child td { border-bottom: none; }
+
+/* Loading/error states in table */
+.table-loading, .table-error {
+  padding: 16px; font-size: 13px; color: #64748B; text-align: center;
+}
+.table-error { color: #EF4444; }
+
+/* ── Select Shipments toggle button ── */
+.btn.select-toggle {
+  background: #F1F5F9;
+  color: #1E293B;
+  border: 1px solid #CBD5E1;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.btn.select-toggle:hover {
+  background: #E2E8F0;
+  border-color: #94A3B8;
+}
+.btn.select-toggle--active {
+  background: #1E293B;
+  color: #fff;
+  border-color: #1E293B;
+}
+.btn.select-toggle--active:hover {
+  background: #0F172A;
+  border-color: #0F172A;
+}
+
+.shipments-header h2 {
+  font-size: 16px;
+  margin: 0;
+  color: #1e293b;
+}
+
+.backend-status {
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+.status-connected { color: #10b981; }
+.status-offline { color: #f59e0b; }
+.status-disconnected { color: #ef4444; }
+.status-checking { color: #3b82f6; }
+
+/* ACTIONS */
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.actions .btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+}
+
+.btn.excel { background: #10b981; color: #fff; }
+.btn.pdf { background: #ef4444; color: #fff; }
+.btn.upload { background: #3b82f6; color: #fff; }
+
+/* SEARCH BAR */
+.search-bar {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.search-bar button {
+  padding: 5px 10px;
+  font-size: 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  cursor: pointer;
+}
+
+/* TABLE WRAPPER */
+.table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 65vh;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1200px;
+}
+th, td {
+  padding: 6px 6px;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+}
+/* Add this to reduce the row text size specifically */
+td {
+  font-size: 9px; /* Adjust this value as needed */
+}
+
+thead th {
+  font-size: 9px;
+  background: #3b82f6;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+tbody tr:hover { background: #f1f5f9; }
+.row-cancelled { background: #ffe5e5; color: red; }
+
+.desc {
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* BADGES */
+.badge {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  color: #fff;
+  font-weight: 600;
+}
+.badge.sea { background: #0284c7; }
+.badge.air { background: #74b208; }
+.badge.road { background: #ea580c; }
+.badge.rail { background: #7c3aed; }
+
+/* EDIT BUTTON */
+.edit-btn {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 9px;
+  border: none;
+  cursor: pointer;
+}
+
+.edit-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+
+/* DELIVERY SELECT */
+.delivery-select {
+  width: 100%;
+  padding: 2px 6px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  font-weight: 600;
+  text-align: center;
+  font-size: 9px;
+}
+.delivery-select.IN_PROCESS { background: #fde68a; color: #92400e; }
+.delivery-select.IN_TRANSIT { background: #bfdbfe; color: #1e40af; }
+.delivery-select.DELIVERED { background: #a7f3d0; color: #065f46; }
+
+/* DESC INPUT */
+.desc-input {
+  width: 110px;
+  padding: 3px 6px;
+  font-size: 9px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.btn.small {
+  padding: 2px 7px;
+  font-size: 9px ;
+  border-radius: 6px;
+}
+
+/* CANCEL / UNDO */
+.btn-cancel {
+  background: #ef4444;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn-undo {
+  background: #10b981;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px
+}
+
+/* INFO / ERROR */
+.info { font-size: 13px; color: #64748b; }
+.error { font-size: 13px; color: red; }
+
+/* PAGINATION */
+.pagination {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.pagination button, .pagination select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  background: #fff;
+}
+
+.pagination button:disabled {
+  background: #e5e7eb;
+  cursor: not-allowed;
+}
+
+/* ======================
+   MODAL (for Bulk Upload)
+====================== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90%;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.modal-header h3 { margin: 0; font-size: 20px; }
+.modal-close {
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: bold;
+  background: none;
+  border: none;
+}
+
+.modal-body {
+  margin-top: 10px;
+}
+
+/* ======================
+   RESPONSIVE
+====================== */
+@media (max-width: 1024px) {
+  .shipments-header { flex-direction: column; align-items: flex-start; }
+  .shipments-header__right { width: 100%; }
+  .header-controls-row { justify-content: flex-start; width: 100%; }
+  .etd-range-bar--in-header { flex-wrap: wrap; }
+  .actions { width: 100%; justify-content: flex-start; }
+  .table-wrap { min-width: 100%; }
+}
+
+@media (max-width: 640px) {
+  th, td { padding: 8px 6px; font-size: 12px; }
+  .desc-input { width: 100px; }
+  .btn.small { padding: 3px 6px; font-size: 11px; }
+  .actions .btn { padding: 6px 10px; font-size: 11px; }
+  .search-bar input { padding: 8px; font-size: 12px; }
+  .pagination { flex-direction: column; gap: 6px; }
+}
+/* Dark background to dim the page when the log is open */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+/* The actual detail box */
+.log-modal-content {
+  background: white;
+  width: 90%;
+  max-width: 1000px;
+  max-height: 90vh;
+  border-radius: 12px;
+  overflow-y: auto;
+  padding: 25px;
+  box-shadow: 0 15px 50px rgba(0,0,0,0.4);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 2px solid #eee;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 15px;
+  background: #f9f9f9;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+}
+
+.mini-table th {
+  background: #333;
+  color: white;
+  padding: 10px;
+  text-align: left;
+}
+
+.mini-table td {
+  padding: 10px;
+  border-bottom: 1px solid #ddd;
+}
+
+.close-x {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #666;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   QMREL / Shipment Detail Modal — CSS
+   Add these classes to your ShipmentsList.css (or a separate file)
+   ═══════════════════════════════════════════════════════════════ */
+ 
+/* ── Overlay ───────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+ 
+/* ── Modal box ─────────────────────────────────────────────────── */
+.sml-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 860px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+  border: 1px solid #E2E8F0;
+  font-family: "Inter", system-ui, sans-serif;
+}
+ 
+/* ── Header ────────────────────────────────────────────────────── */
+.sml-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  background: #1E293B;
+  flex-shrink: 0;
+}
+.sml-modal__header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sml-modal__icon {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.sml-modal__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.sml-modal__enquiry {
+  font-size: 17px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.2px;
+}
+.sml-modal__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.sml-modal__close:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+ 
+/* ── Scrollable body ───────────────────────────────────────────── */
+.sml-modal__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 22px 28px;
+  background: #F8FAFC;
+}
+ 
+/* ── Section label ─────────────────────────────────────────────── */
+.sml-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #2563EB;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 2px solid #DBEAFE;
+}
+.sml-section-label__bar {
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  background: #2563EB;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.sml-parts-count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  background: #EFF6FF;
+  color: #2563EB;
+  padding: 1px 8px;
+  border-radius: 20px;
+}
+ 
+/* ── Info grid — 3 columns ─────────────────────────────────────── */
+.sml-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+ 
+/* ── Info cell ─────────────────────────────────────────────────── */
+.sml-cell {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 10px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sml-cell:hover {
+  border-color: #BFDBFE;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.06);
+}
+.sml-cell__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sml-cell__value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1E293B;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.sml-cell__value--hl {
+  font-size: 15px;
+  color: #2563EB;
+}
+ 
+/* ── Status badge inside cell ──────────────────────────────────── */
+.sml-status-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.sml-status-hint {
+  font-size: 11px;
+  color: #64748B;
+  margin-top: 4px;
+  font-weight: 500;
+}
+ 
+/* ── Totals row ────────────────────────────────────────────────── */
+.sml-totals-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.sml-total-card {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.sml-total-card--blue   { background: #EFF6FF; border-color: #93C5FD; }
+.sml-total-card--purple { background: #F5F3FF; border-color: #C4B5FD; }
+ 
+.sml-total-card__icon  { font-size: 22px; }
+.sml-total-card__num   {
+  font-size: 26px;
+  font-weight: 800;
+  color: #1E40AF;
+  line-height: 1.1;
+}
+.sml-total-card--purple .sml-total-card__num { color: #5B21B6; }
+.sml-total-card__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #3B82F6;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.sml-total-card--purple .sml-total-card__label { color: #7C3AED; }
+ 
+/* ── Parts table ───────────────────────────────────────────────── */
+.sml-parts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  background: #fff;
+}
+.sml-parts-table thead tr {
+  background: #1E293B;
+}
+.sml-parts-table th {
+  padding: 10px 13px;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.sml-parts-table td {
+  padding: 10px 13px;
+  border-bottom: 1px solid #F1F5F9;
+  color: #374151;
+  vertical-align: middle;
+}
+.sml-parts-table tr:nth-child(even) td {
+  background: #F8FAFC;
+}
+.sml-parts-table tr:last-child td {
+  border-bottom: none;
+}
+.sml-parts-table tr:hover td {
+  background: #EFF6FF;
+}
+ 
+/* Part number circle badge */
+.sml-part-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #2563EB;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+/* Part No column emphasis */
+.sml-part-no {
+  font-weight: 700;
+  color: #1E293B;
+}
+/* Numeric columns right-aligned */
+.sml-td-num {
+  text-align: right;
+  font-weight: 600;
+  color: #374151;
+}
+.sml-td-num--blue {
+  color: #1D4ED8;
+}
+/* Empty state */
+.sml-no-parts {
+  text-align: center;
+  padding: 24px;
+  color: #94A3B8;
+  font-size: 13px;
+}
+ 
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .sml-grid-3    { grid-template-columns: repeat(2, 1fr); }
+  .sml-totals-row { grid-template-columns: repeat(2, 1fr); }
+  .sml-modal     { border-radius: 10px; }
+  .sml-modal__enquiry { font-size: 14px; }
+}
+@media (max-width: 460px) {
+  .sml-grid-3    { grid-template-columns: 1fr; }
+  .sml-totals-row { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NEW — ETD Date Range filter bar (top of Shipment List)
+   Additive only; matches existing search-bar / btn visual language.
+   ══════════════════════════════════════════════════════════════════ */
+.etd-range-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 16px 0 0 0;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.etd-range-bar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.etd-range-bar__field label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+.etd-range-bar__field input[type="date"] {
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.etd-range-bar__apply {
+  background: #3b82f6;
+  color: #fff;
+}
+.etd-range-bar__clear {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NEW — Excel-style column filter (ETD / Supplier ETD headers)
+   ══════════════════════════════════════════════════════════════════ */
+/* FIX: no longer sets `position: relative` here — that was overriding the
+   `position: sticky` from `thead th` (a class selector beats a plain
+   element selector regardless of source order), which is why only these
+   two header cells scrolled away instead of staying frozen. `position:
+   sticky` on the parent `th` already provides a positioning context for
+   the popup below, so nothing else needs to change. */
+.col-filterable__label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+.col-filter-icon {
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.col-filter-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  color: #1E293B;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  padding: 12px 14px;
+  width: 220px;
+  z-index: 20;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  white-space: normal;
+  cursor: default;
+  /* FIX: the popup sits inside .table-wrap, which has its own
+     overflow-y:auto + max-height — so anything below the wrap's visible
+     edge was getting clipped with no way to reach it. Bounding the
+     popup's own height and scrolling its content internally keeps every
+     option reachable regardless of where the header cell sits. */
+  max-height: min(60vh, 320px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.col-filter-popup__title {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: #1E293B;
+}
+.col-filter-popup__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+  font-size: 11px;
+  color: #334155;
+}
+.col-filter-popup__divider {
+  border-top: 1px solid #f1f5f9;
+  margin: 8px 0;
+}
+.col-filter-popup__label {
+  font-weight: 600;
+  font-size: 10px;
+  color: #64748B;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.col-filter-popup__sublabel {
+  font-size: 9px;
+  color: #94A3B8;
+  display: block;
+  margin-bottom: 2px;
+}
+.col-filter-popup__row {
+  display: flex;
+  gap: 8px;
+}
+.col-filter-popup__row input[type="date"] {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.col-filter-popup__sort {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.col-filter-popup__sort button {
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 10px;
+  cursor: pointer;
+  color: #334155;
+}
+.col-filter-popup__sort button.active {
+  background: #DBEAFE;
+  border-color: #93C5FD;
+  color: #1E40AF;
+  font-weight: 600;
+}
+.col-filter-popup__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.col-filter-popup__apply {
+  flex: 1;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.col-filter-popup__reset {
+  flex: 1;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.col-filter-popup__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.col-filter-popup__apply {
+  flex: 1;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.col-filter-popup__reset {
+  flex: 1;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 0;
+  font-size: 11px;
+  cursor: pointer;
 }

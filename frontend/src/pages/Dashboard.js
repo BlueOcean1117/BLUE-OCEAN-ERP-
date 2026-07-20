@@ -1,152 +1,156 @@
-import React, { useEffect, useState } from "react";
-import API from "../services/api";
+import React, { useCallback } from "react";
+import * as XLSX from "xlsx";
 import "./Dashboard.css";
 
-import { Bar, Pie } from "react-chartjs-2";
+import useDashboardData from "./dashboard/useDashboardData";
+import FilterBar from "./dashboard/FilterBar";
+import KpiCards from "./dashboard/KpiCards";
+import DetailCards from "./dashboard/DetailCards";
+import AlertsPanel from "./dashboard/AlertsPanel";
+import { ShipmentTable, UntrackedTable } from "./dashboard/ShipmentTables";
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  ArcElement,
-  Tooltip,
-  Legend,
-} from "chart.js";
+  StatusDonutChart,
+  MonthlyBarChart,
+  DeliveryTrendLineChart,
+  HorizontalBarChart,
+  StatusProgressBars,
+} from "./dashboard/DashboardCharts";
+import PartNumberAnalytics from "./dashboard/PartNumberAnalytics";
+import EtdShipmentSearch from "./dashboard/EtdShipmentSearch";
 
-/* Chart.js registration */
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  ArcElement,
-  Tooltip,
-  Legend,
-);
+function ChartCard({ title, subtitle, children, height = 240 }) {
+  return (
+    <div className="chart-card">
+      <div className="chart-card-hdr">
+        <h4>{title}</h4>
+        {subtitle && <span className="chart-card-sub">{subtitle}</span>}
+      </div>
+      <div className="chart-card-body" style={{ height }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState(null);
-  const [error, setError] = useState("");
+  const {
+    loading,
+    error,
+    lastFetched,
+    refresh,
+    filters,
+    setFilters,
+    filterOptions,
+    filteredCount,
+    totalCount,
+    kpis,
+    charts,
+    detailCards,
+    tables,
+    alerts,
+    filteredShipments,
+  } = useDashboardData();
 
-  useEffect(() => {
-    API.get("/shipment/dashboard")
-      .then((res) => {
-        setSummary(res.data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setError("Failed to load dashboard data");
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) return <p className="dashboard-loading">Loading dashboard...</p>;
-  if (error) return <p className="dashboard-error">{error}</p>;
-
-  /* ---------- CHART OPTIONS ---------- */
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: "bottom",
-        labels: {
-          boxWidth: 14,
-        },
-      },
-    },
-  };
-
-  /* ---------- CHART DATA ---------- */
-
-  const modeChartData = {
-    labels: summary.modeWise.map((m) => m.mode),
-    datasets: [
-      {
-        label: "Shipments by Mode",
-        data: summary.modeWise.map((m) => Number(m.count)),
-        backgroundColor: ["#4CAF50", "#2196F3", "#FF9800"],
-        borderRadius: 8,
-      },
-    ],
-  };
-
-  const statusChartData = {
-    labels: summary.statusWise.map((s) => s.status),
-    datasets: [
-      {
-        label: "Shipments by Status",
-        data: summary.statusWise.map((s) => Number(s.count)),
-        backgroundColor: ["#673AB7", "#009688", "#E91E63"],
-      },
-    ],
-  };
+  const handleExport = useCallback(() => {
+    const rows = filteredShipments.map((s) => ({
+      "Shipment No": s.ref || "N/A",
+      "Customer": s.customer || "N/A",
+      "Supplier": s.supplier || "N/A",
+      "BL No": s.blNo || "N/A",
+      "Invoice No": s.invoiceNo || "N/A",
+      "PO No": "N/A",
+      "Part No(s)": s.partNos.join(", ") || "N/A",
+      "Origin (POL)": s.origin || "N/A",
+      "ETD": s.etd ? new Date(s.etd).toLocaleDateString() : "N/A",
+      "Delivery Date": s.deliveryDate ? new Date(s.deliveryDate).toLocaleDateString() : "N/A",
+      "Status": s.status,
+      "Payment Status": "No data available",
+      "Total Shipment Value": "No data available",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "No data": "No shipments match the current filters" }]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Logistics Dashboard");
+    XLSX.writeFile(wb, `logistics-dashboard-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }, [filteredShipments]);
 
   return (
-    <div className="dashboard-container">
-      {/* Header */}
-      <div className="dashboard-header">
-        <h2 className="dashboard-title">Logistics Dashboard</h2>
-        <p className="dashboard-subtitle">
-          Real-time insights into your shipment operations
-        </p>
-      </div>
+    <div className="ldash">
+      <FilterBar
+        filters={filters}
+        setFilters={setFilters}
+        filterOptions={filterOptions}
+        onRefresh={refresh}
+        onExport={handleExport}
+        loading={loading}
+        lastFetched={lastFetched}
+      />
 
-      {/* Stats */}
-      <div className="dashboard-stats">
-        <div className="stat-card">
-          <div className="stat-icon">📦</div>
-          <div className="stat-content">
-            <h3>{summary.totalShipments}</h3>
-            <p>Total Shipments</p>
+      {error && (
+        <div className="ldash-error">
+          {error} <button onClick={refresh}>Retry</button>
+        </div>
+      )}
+
+      {loading && !error ? (
+        <div className="ldash-loading">Loading live shipment data…</div>
+      ) : (
+        <>
+          {filteredCount !== totalCount && (
+            <div className="ldash-filter-note">
+              Showing <strong>{filteredCount}</strong> of {totalCount} shipments based on current filters.
+            </div>
+          )}
+
+          {/* 2 — KPI summary */}
+          <KpiCards kpis={kpis} />
+
+          {/* 3 — Visual analytics */}
+          <div className="section-hdr">Analytics</div>
+          <div className="charts-grid">
+            <ChartCard title="Shipment Status Distribution" subtitle="Current snapshot">
+              <StatusDonutChart data={charts.statusDistribution} />
+            </ChartCard>
+            <ChartCard title="Monthly Shipment Count" subtitle="By date created">
+              <MonthlyBarChart data={charts.monthlyShipments} />
+            </ChartCard>
+            <ChartCard title="Delivery Trend" subtitle="Delivered shipments over time">
+              <DeliveryTrendLineChart data={charts.deliveryTrend} />
+            </ChartCard>
+            <ChartCard title="Status-wise Completion" subtitle="Share of total shipments">
+              <StatusProgressBars distribution={charts.statusDistribution} />
+            </ChartCard>
+            <ChartCard title="Delay Analysis" subtitle="Delayed shipments by supplier">
+              <HorizontalBarChart data={charts.delayBySupplier} color="#DC2626" emptyMessage="No delayed shipments — nothing to analyze" />
+            </ChartCard>
+            <ChartCard title="Top Customers" subtitle="By shipment count">
+              <HorizontalBarChart data={charts.topCustomers} color="#7C3AED" />
+            </ChartCard>
           </div>
-        </div>
-      </div>
 
-      {/* Charts */}
-      <div className="dashboard-charts">
-        <div className="chart-card">
-          <h4>Shipments by Mode</h4>
-          <div className="chart-container">
-            <Bar data={modeChartData} options={chartOptions} />
+          {/* 4 — Operational insights */}
+          <div className="section-hdr">Operational Insights</div>
+          <div className="tables-grid">
+            <ShipmentTable title="Recent Shipments" rows={tables.recent} emptyMessage="No shipments recorded yet" accentColor="#2563EB" />
+            <ShipmentTable title="Pending Shipments" rows={tables.pending} emptyMessage="No pending shipments" accentColor="#92400E" />
+            <ShipmentTable title="Delayed Shipments" rows={tables.delayed} emptyMessage="No delayed shipments" accentColor="#991B1B" />
+            <UntrackedTable title="Payment Pending Shipments" note="Payment status isn't captured in the Shipment module yet" />
           </div>
-        </div>
 
-        <div className="chart-card">
-          <h4>Shipments by Status</h4>
-          <div className="chart-container">
-            <Pie data={statusChartData} options={chartOptions} />
-          </div>
-        </div>
-      </div>
+          {/* 5 — Detail cards */}
+          <div className="section-hdr">Breakdowns</div>
+          <DetailCards detailCards={detailCards} />
 
-      {/* Details */}
-      <div className="dashboard-details">
-        <div className="detail-card">
-          <h4>Mode Breakdown</h4>
-          <ul className="detail-list">
-            {summary.modeWise.map((m) => (
-              <li key={m.mode} className="detail-item">
-                <span className="detail-label">{m.mode}</span>
-                <span className="detail-value">{m.count}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          {/* 6 — Alerts / exceptions */}
+          <div className="section-hdr">Alerts &amp; Exceptions</div>
+          <AlertsPanel alerts={alerts} />
 
-        <div className="detail-card">
-          <h4>Status Breakdown</h4>
-          <ul className="detail-list">
-            {summary.statusWise.map((s) => (
-              <li key={s.status} className="detail-item">
-                <span className="detail-label">{s.status}</span>
-                <span className="detail-value">{s.count}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+          {/* 7 — NEW: Part Number Analytics (Feature 1) */}
+          <PartNumberAnalytics />
+
+          {/* 8 — NEW: Shipment Search by ETD Date (Feature 2) */}
+          <EtdShipmentSearch />
+        </>
+      )}
     </div>
   );
 }

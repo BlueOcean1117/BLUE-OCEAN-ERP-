@@ -59,6 +59,18 @@ function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / MS);
 }
 
+// ── Shipment Type normalization (Dashboard fix request, item 4) ──────────
+// The dropdown must show ONLY "Air" and "Sea", while grouping every raw
+// database variant ("AirX", "Air-samples", "sea", "SEA", "Sea FCL", ...)
+// under the correct bucket. Match is a case-insensitive "contains" check —
+// exactly mirrors the backend spec ("shipmentType contains 'air'/'sea'").
+export function normalizeShipmentType(rawMode) {
+  const m = String(rawMode || "").toLowerCase();
+  if (m.includes("air")) return "Air";
+  if (m.includes("sea")) return "Sea";
+  return null; // unrecognized / not tracked — excluded from the Air/Sea dropdown
+}
+
 function topN(map, n = 5) {
   return Object.entries(map)
     .sort((a, b) => b[1] - a[1])
@@ -125,11 +137,13 @@ export default function useDashboardData() {
         etd: s.etd || null,
         deliveryDate: s.final_delivery_date || null,
         mode: s.mode || "",
+        shipmentType: normalizeShipmentType(s.mode), // "Air" | "Sea" | null — see normalizeShipmentType above
         ff: s.ff || "",
         paymentStatus: null, // not tracked in schema
         seaCharge: null, // not tracked in schema
         shipmentValue: null, // not tracked in schema
         createdAt: s.createdAt || null,
+        rawStatus: s.status || "ACTIVE", // ACTIVE / CANCELLED / DELETED — distinct from computed delivery status
         status: calcDeliveryStatus(s),
         missingBl,
         missingInvoice,
@@ -148,7 +162,10 @@ export default function useDashboardData() {
       customers: uniq(shipments.map((s) => s.customer)),
       suppliers: uniq(shipments.map((s) => s.supplier)),
       origins: uniq(shipments.map((s) => s.origin)),
-      modes: uniq(shipments.map((s) => s.mode)),
+      // Dropdown shows ONLY "Air" / "Sea" (never raw DB values like "AirX",
+      // "sea", "Air-samples") — see normalizeShipmentType above. Only
+      // include a bucket if at least one shipment actually falls into it.
+      modes: ["Air", "Sea"].filter((type) => shipments.some((s) => s.shipmentType === type)),
     };
   }, [shipments]);
 
@@ -160,7 +177,7 @@ export default function useDashboardData() {
       if (filters.customer !== "ALL" && s.customer !== filters.customer) return false;
       if (filters.supplier !== "ALL" && s.supplier !== filters.supplier) return false;
       if (filters.origin !== "ALL" && s.origin !== filters.origin) return false;
-      if (filters.mode !== "ALL" && s.mode !== filters.mode) return false;
+      if (filters.mode !== "ALL" && s.shipmentType !== filters.mode) return false;
       if (filters.dateFrom && (!s.createdAt || new Date(s.createdAt) < new Date(filters.dateFrom))) return false;
       if (filters.dateTo && (!s.createdAt || new Date(s.createdAt) > new Date(filters.dateTo))) return false;
       if (q) {
@@ -180,8 +197,16 @@ export default function useDashboardData() {
     const finalized = byStatus.DELIVERED + byStatus.DELAYED;
     const onTimePct = finalized > 0 ? Math.round((byStatus.DELIVERED / finalized) * 100) : null;
 
+    // Only DELIVERED shipments count toward Transit Time — a shipment that
+    // is still IN_PROCESS/IN_TRANSIT/DELAYED may already have a *planned*
+    // final_delivery_date sitting in the future; including those inflated
+    // the average with days that haven't actually elapsed yet (the
+    // "152.4 Days" bug). Cancelled shipments are excluded via `filtered`
+    // never containing a computed DELIVERED status for them in the first
+    // place, since calcDeliveryStatus only returns DELIVERED once today's
+    // date has actually reached final_delivery_date.
     const transitSamples = filtered
-      .filter((s) => s.etd && s.deliveryDate)
+      .filter((s) => s.status === "DELIVERED" && s.rawStatus !== "CANCELLED" && s.etd && s.deliveryDate)
       .map((s) => daysBetween(s.etd, s.deliveryDate))
       .filter((d) => d >= 0);
     const avgTransitDays =

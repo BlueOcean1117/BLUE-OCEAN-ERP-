@@ -10,6 +10,8 @@ const {
   fetchAllShipments,
   getShipmentByBl,
    getShipmentById,  
+  fetchPartAnalytics,
+  searchShipmentsByEtd,
 } = require("../controllers/shipment.controller");
 const router = express.Router();
 
@@ -21,6 +23,11 @@ router.patch("/manual-desc/:id", updateManualDesc);
 router.post("/bulk-upload", bulkUploadShipments);
 router.get("/enquiry-number", getEnquiryNumber);
 router.get("/by-bl/:blNo", getShipmentByBl);
+
+// ── New: Dashboard Enhancement — Part Number Analytics + ETD Search ──────
+router.get("/search-by-etd", searchShipmentsByEtd);
+router.get("/part-analytics/:partNo", fetchPartAnalytics);
+
 router.get("/", fetchAllShipments)
 
 module.exports = router;

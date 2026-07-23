@@ -73,6 +73,17 @@ function escapeRegex(str = "") {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Builds a case-insensitive, partial-match regex for a part number search
+// term, ignoring spaces and dashes on both sides of the comparison — so
+// "501 14 013", "501-14-013", and "5011 4013" all match the same part.
+// Throws on an empty/whitespace-only term so callers can 400 cleanly.
+function buildPartNoRegex(term) {
+  const cleaned = String(term || "").trim();
+  if (!cleaned) throw new Error("Empty part number search term");
+  const normalized = escapeRegex(cleaned).replace(/[\s-]+/g, "[\\s-]*");
+  return new RegExp(normalized, "i");
+}
+
 // Mirrors calcDeliveryStatus() in frontend/src/pages/ShipmentsList.js and
 // frontend/src/pages/dashboard/useDashboardData.js EXACTLY, so a shipment's
 // computed status is identical everywhere in the app. Used when we already
@@ -640,6 +651,22 @@ exports.fetchAllShipments = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch shipments" });
   }
 };
+
+// ✅ NEW — was imported by routes.js and called by the edit-shipment wizard
+// (frontend/src/wizard/Wizard.js, GET /shipment/:id fallback fetch when a
+// user opens an edit link directly instead of navigating from the list)
+// but was never actually implemented, so that fetch was 404-ing.
+exports.getShipmentById = async (req, res) => {
+  try {
+    const doc = await shipment.findOne({ _id: req.params.id, status: { $ne: "DELETED" } }).lean();
+    if (!doc) return res.status(404).json({ message: "Shipment not found" });
+    res.json(doc);
+  } catch (err) {
+    console.error("Get shipment by id error:", err);
+    res.status(500).json({ message: "Failed to fetch shipment" });
+  }
+};
+
 exports.fetchPartAnalytics = async (req, res) => {
   try {
     const partNo = (req.params.partNo || "").trim();

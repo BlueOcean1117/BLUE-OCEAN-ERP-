@@ -40,6 +40,20 @@ const verifyToken = (req, res, next) => {
 };
 
 // Role permission middleware
+const optionalAuth = (req, res, next) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) return next(); // no token — proceed as before, req.user stays undefined
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    // invalid/expired token — ignore it, don't block the request
+  }
+  next();
+};
+
 const allowRoles = (...roles) => {
   return (req, res, next) => {
 
@@ -73,6 +87,13 @@ const allowRoles = (...roles) => {
 
     next();
   };
+};
+
+module.exports = {
+  verifyToken,
+  optionalAuth,
+  allowRoles,
+  JWT_SECRET
 };
 
 module.exports = {

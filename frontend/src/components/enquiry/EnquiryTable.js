@@ -136,8 +136,8 @@ export default function EnquiryTable({
                         : enq.partMapping.boPartName
                       : "—"}
                   </td>
-                   <td data-label="Modified BO Part No">
-                    {enq.partMapping?.modifiedBOPartNo ? (
+                   <td data-label="BO Part No">
+                    {enq.partMapping?.boPartNo ? (
                       <span className="cell-bo-part">
                         {enq.partMapping.modifiedBOPartNo}
                       </span>

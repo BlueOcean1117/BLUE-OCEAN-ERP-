@@ -347,6 +347,11 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
   const partsKey = JSON.stringify(
     form.parts.map((p) => ({
       q: p.part_qty, n: p.part_net_unit, g: p.part_gross, b: p.part_no_of_boxes,
+      bs: p.part_box_size, // ✅ FIX — Box Size was missing from this fingerprint, so
+      // editing it never re-fired the sync effect below and onUpdate() was never
+      // called with the new value. Parent Wizard "data" (what gets PATCHed to the
+      // backend on Update) kept the OLD box_size forever. Adding it here makes the
+      // effect fire on Box Size edits too, so the new value reaches the server.
     }))
   );
 

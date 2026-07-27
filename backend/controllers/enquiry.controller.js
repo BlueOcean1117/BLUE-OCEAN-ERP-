@@ -37,12 +37,12 @@ exports.createEnquiry = async (req, res) => {
     if (existing) {
       return res.status(400).json({ message: "Enquiry number already exists" });
     }
-
+data.generatedBy = req.user?.name || data.generatedBy || "System";
     data.editHistory = [{
       section: "BO / Enquiry Details",
       sectionColor: "bo",
       description: "Enquiry record created",
-      user: data.generatedBy || "System",
+    user: data.generatedBy, 
       timestamp: new Date(),
     }];
 
@@ -199,7 +199,8 @@ exports.updateEnquiry = async (req, res) => {
 
     const data = req.body;
     const now = new Date();
-    const user = data.generatedBy || current.generatedBy || "System";
+    const user = req.user?.name || data.generatedBy || current.generatedBy || "System";  // CHANGED
+ data.generatedBy = user; 
     const newEntries = [];
 
     // Helper: normalize a value to a comparable string

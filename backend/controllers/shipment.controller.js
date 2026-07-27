@@ -1109,3 +1109,39 @@ exports.getShipmentByBl = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /shipment/:id  — fetch one shipment by MongoDB _id for the edit form
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS WAS MISSING:
+//   The route file imported getShipmentById and Wizard.js called
+//   GET /shipment/:id on edit, but this handler was never defined in this
+//   controller. Express had no GET /:id route registered, so the call
+//   either 404'd or matched the wrong route. Wizard then fell back to
+//   location.state, which only contained the aggregate $project subset
+//   (parts[].net_wt_per_unit and parts[].box_size were present in the DB
+//   but not surfaced by the list endpoint projection — so the edit form
+//   always showed 0 / empty for those fields).
+//
+// FIX: Return the raw Mongoose document (.lean()) so ALL stored fields —
+//   including parts[].net_wt_per_unit, parts[].box_size, parts[].gross_wt,
+//   parts[].no_of_boxes, supplier_etd, etc. — reach the edit form.
+//   No schema, validation, or save logic is changed.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getShipmentById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid shipment ID" });
+    }
+    const doc = await shipment.findById(id).lean();
+    if (!doc) {
+      return res.status(404).json({ message: "Shipment not found" });
+    }
+    res.json(doc);
+  } catch (err) {
+    console.error("getShipmentById error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};

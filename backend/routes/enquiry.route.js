@@ -1,4 +1,5 @@
 const express = require("express");
+const { optionalAuth } = require("../middleware/auth"); 
 const {
   createEnquiry,
   getAllEnquiries,
@@ -11,11 +12,11 @@ const {
 
 const router = express.Router();
 
-router.post("/create", createEnquiry);
+router.post("/create", optionalAuth, createEnquiry);
 router.get("/stats", getEnquiryStats);
 router.get("/filters", getFilterOptions);
 router.get("/:id", getEnquiryById);
-router.put("/update/:id", updateEnquiry);
+router.put("/update/:id", optionalAuth, updateEnquiry);
 router.delete("/delete/:id", deleteEnquiry);
 router.get("/", getAllEnquiries);
 

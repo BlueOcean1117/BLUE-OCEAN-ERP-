@@ -77,9 +77,9 @@ export default function EnquiryTable({
               {/* Part Number Mapping */}
               <th>Customer Part No</th>
             <th>BO Part Name</th>
-              <th>Modified BO Part No</th>
+              <th> BO Part No</th>
                <th onClick={() => handleSort("enquiryNumber")}>
-                Inquiry Number Generated{renderSortIcon("enquiryNumber")}
+                Inquiry Number {renderSortIcon("enquiryNumber")}
               </th>
 
               {/* PO */}

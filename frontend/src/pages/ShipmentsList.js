@@ -1158,10 +1158,16 @@ export default function ShipmentsList() {
         <span>Page <strong>{page}</strong> of {totalPages}</span>
         <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next ➡</button>
         <select
-          value={pageSize}
+          value={pageSize >= ALL_ENTRIES ? "all" : String(pageSize)}
           onChange={(e) => {
-            setPageSize(e.target.value === "all" ? 10000 : Number(e.target.value));
+            const newSize = e.target.value === "all" ? ALL_ENTRIES : Number(e.target.value);
+            setPageSize(newSize);
             setPage(1);
+            try {
+              window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, e.target.value === "all" ? "all" : String(newSize));
+            } catch (err) {
+              // ignore — persistence is a nice-to-have, not a hard requirement
+            }
           }}
         >
           <option value="5">5</option>

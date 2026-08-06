@@ -80,9 +80,22 @@ const IconCal = () => (
     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
   </svg>
 );
+const IconParentTag = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="3"/>
+  </svg>
+);
+const IconChildTag = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18l6-6-6-6"/>
+  </svg>
+);
 
 export default function ViewEnquiryModal({ isOpen, onClose, enquiry }) {
   if (!isOpen || !enquiry) return null;
+
+  const hasMultiParts = Array.isArray(enquiry.parts) && enquiry.parts.length > 0;
+  const hasMultiPO = Array.isArray(enquiry.poDetailsList) && enquiry.poDetailsList.length > 0;
 
   const stored = (enquiry.editHistory || []).map((item) => ({
     section: item.section,
@@ -157,37 +170,117 @@ export default function ViewEnquiryModal({ isOpen, onClose, enquiry }) {
             </div>
           </div>
 
-          {/* ─── Part Number Mapping ─── */}
+          {/* ─── Parts Details (parent parts + nested child parts) ─── */}
           <div className="view-card-section part-bg">
             <div className="view-card-blob part-card-blob" />
             <div className="view-card-header">
               <span className="view-card-icon part-icon"><IconLink /></span>
-              <span className="view-card-title">Part Number Mapping</span>
+              <span className="view-card-title">
+                Parts Details{hasMultiParts ? ` (${enquiry.parts.length} part${enquiry.parts.length > 1 ? "s" : ""})` : ""}
+              </span>
             </div>
-            <div className="view-fields-grid">
-              <div className="view-field-card">
-                <label>CUSTOMER PART NO</label>
-                <span>{enquiry.partMapping?.customerPartNo || "—"}</span>
+
+            {hasMultiParts ? (
+              <div className="parts-hierarchy">
+                {enquiry.parts.map((p, idx) => (
+                  <div className="parts-h-parent" key={idx}>
+                    <div className="parts-h-parent-header">
+                      <span className="parts-h-badge parent"><IconParentTag /> Parent Part {idx + 1}</span>
+                      {p.customerPartNo && <span className="parts-h-name">{p.customerPartNo}</span>}
+                    </div>
+                    <div className="view-fields-grid">
+                      <div className="view-field-card">
+                        <label>CUSTOMER PART NO</label>
+                        <span>{p.customerPartNo || "—"}</span>
+                      </div>
+                      <div className="view-field-card">
+                        <label>CUSTOMER PART NAME</label>
+                        <span>{p.customerPartName || "—"}</span>
+                      </div>
+                    </div>
+                    <div className="view-fields-grid">
+                      <div className="view-field-card">
+                        <label>MODIFIED BO PART NO</label>
+                        <span>
+                          {p.modifiedBOPartNo
+                            ? <span className="view-badge pink">{p.modifiedBOPartNo}</span>
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="view-field-card">
+                        <label>BO PART NAME</label>
+                        <span>{p.boPartName || "—"}</span>
+                      </div>
+                    </div>
+
+                    {Array.isArray(p.children) && p.children.length > 0 && (
+                      <div className="parts-h-children">
+                        {p.children.map((c, cidx) => (
+                          <div className="parts-h-child" key={cidx}>
+                            <div className="parts-h-child-header">
+                              <span className="parts-h-badge child"><IconChildTag /> Child Part {cidx + 1}</span>
+                              {c.customerPartNo && <span className="parts-h-name">{c.customerPartNo}</span>}
+                            </div>
+                            <div className="view-fields-grid">
+                              <div className="view-field-card">
+                                <label>CUSTOMER PART NO</label>
+                                <span>{c.customerPartNo || "—"}</span>
+                              </div>
+                              <div className="view-field-card">
+                                <label>CUSTOMER PART NAME</label>
+                                <span>{c.customerPartName || "—"}</span>
+                              </div>
+                            </div>
+                            <div className="view-fields-grid">
+                              <div className="view-field-card">
+                                <label>MODIFIED BO PART NO</label>
+                                <span>
+                                  {c.modifiedBOPartNo
+                                    ? <span className="view-badge pink">{c.modifiedBOPartNo}</span>
+                                    : "—"}
+                                </span>
+                              </div>
+                              <div className="view-field-card">
+                                <label>BO PART NAME</label>
+                                <span>{c.boPartName || "—"}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="view-field-card">
-                <label>CUSTOMER PART NAME</label>
-                <span>{enquiry.partMapping?.customerPartName || "—"}</span>
-              </div>
-            </div>
-            <div className="view-fields-grid">
-              <div className="view-field-card">
-                <label>MODIFIED BO PART NO</label>
-                <span>
-                  {enquiry.partMapping?.modifiedBOPartNo
-                    ? <span className="view-badge pink">{enquiry.partMapping.modifiedBOPartNo}</span>
-                    : "—"}
-                </span>
-              </div>
-              <div className="view-field-card">
-                <label>BO PART NAME</label>
-                <span>{enquiry.partMapping?.boPartName || "—"}</span>
-              </div>
-            </div>
+            ) : (
+              /* Legacy single-part enquiries: fall back to partMapping exactly as before */
+              <>
+                <div className="view-fields-grid">
+                  <div className="view-field-card">
+                    <label>CUSTOMER PART NO</label>
+                    <span>{enquiry.partMapping?.customerPartNo || "—"}</span>
+                  </div>
+                  <div className="view-field-card">
+                    <label>CUSTOMER PART NAME</label>
+                    <span>{enquiry.partMapping?.customerPartName || "—"}</span>
+                  </div>
+                </div>
+                <div className="view-fields-grid">
+                  <div className="view-field-card">
+                    <label>MODIFIED BO PART NO</label>
+                    <span>
+                      {enquiry.partMapping?.modifiedBOPartNo
+                        ? <span className="view-badge pink">{enquiry.partMapping.modifiedBOPartNo}</span>
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="view-field-card">
+                    <label>BO PART NAME</label>
+                    <span>{enquiry.partMapping?.boPartName || "—"}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* ─── PO Number Details ─── */}
@@ -195,35 +288,82 @@ export default function ViewEnquiryModal({ isOpen, onClose, enquiry }) {
             <div className="view-card-blob po-card-blob" />
             <div className="view-card-header">
               <span className="view-card-icon po-icon"><IconBox /></span>
-              <span className="view-card-title">PO Number Details</span>
+              <span className="view-card-title">
+                PO Number Details{hasMultiPO ? ` (${enquiry.poDetailsList.length} supplier${enquiry.poDetailsList.length > 1 ? "s" : ""})` : ""}
+              </span>
             </div>
-            <div className="view-fields-grid">
-              <div className="view-field-card">
-                <label>SUPPLIER NAME</label>
-                <span>{enquiry.poDetails?.supplierName || "—"}</span>
+
+            {hasMultiPO ? (
+              <div className="parts-hierarchy">
+                {enquiry.poDetailsList.map((po, idx) => (
+                  <div className="parts-h-parent" key={idx}>
+                    <div className="parts-h-parent-header">
+                      <span className="parts-h-badge parent"><IconParentTag /> Supplier {idx + 1}</span>
+                      {po.supplierName && <span className="parts-h-name">{po.supplierName}</span>}
+                      {po.linkedPartNo && (
+                        <span className="view-badge pink" style={{ marginLeft: 8 }}>
+                          for part: {po.linkedPartNo}
+                        </span>
+                      )}
+                    </div>
+                    <div className="view-fields-grid">
+                      <div className="view-field-card">
+                        <label>SUPPLIER NAME</label>
+                        <span>{po.supplierName || "—"}</span>
+                      </div>
+                      <div className="view-field-card">
+                        <label>PO NUMBER</label>
+                        <span>
+                          {po.poNumber
+                            ? <span className="view-badge green">{po.poNumber}</span>
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="view-fields-grid">
+                      <div className="view-field-card">
+                        <label>DATE OF ISSUE</label>
+                        <span className="view-date-val"><IconCal /> {formatDateShort(po.dateOfIssue)}</span>
+                      </div>
+                      <div className="view-field-card">
+                        <label>APPLIES TO</label>
+                        <span>{po.linkedPartNo || "Whole enquiry"}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="view-field-card">
-                <label>PO NUMBER</label>
-                <span>
-                  {enquiry.poDetails?.poNumber
-                    ? <span className="view-badge green">{enquiry.poDetails.poNumber}</span>
-                    : "—"}
-                </span>
-              </div>
-            </div>
-            <div className="view-fields-grid">
-              <div className="view-field-card">
-                <label>DATE OF ISSUE</label>
-                <span className="view-date-val"><IconCal /> {formatDateShort(enquiry.poDetails?.dateOfIssue)}</span>
-              </div>
-              <div className="view-field-card">
-                <label>LAST EDITED</label>
-                <span className="view-meta-info">
-                  <span className="view-meta-chip"><IconUser /> {enquiry.generatedBy || "—"}</span>
-                  <span className="view-meta-chip"><IconClock /> {formatDateShort(enquiry.createdAt)}</span>
-                </span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="view-fields-grid">
+                  <div className="view-field-card">
+                    <label>SUPPLIER NAME</label>
+                    <span>{enquiry.poDetails?.supplierName || "—"}</span>
+                  </div>
+                  <div className="view-field-card">
+                    <label>PO NUMBER</label>
+                    <span>
+                      {enquiry.poDetails?.poNumber
+                        ? <span className="view-badge green">{enquiry.poDetails.poNumber}</span>
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="view-fields-grid">
+                  <div className="view-field-card">
+                    <label>DATE OF ISSUE</label>
+                    <span className="view-date-val"><IconCal /> {formatDateShort(enquiry.poDetails?.dateOfIssue)}</span>
+                  </div>
+                  <div className="view-field-card">
+                    <label>LAST EDITED</label>
+                    <span className="view-meta-info">
+                      <span className="view-meta-chip"><IconUser /> {enquiry.generatedBy || "—"}</span>
+                      <span className="view-meta-chip"><IconClock /> {formatDateShort(enquiry.createdAt)}</span>
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* ─── Generation Information ─── */}

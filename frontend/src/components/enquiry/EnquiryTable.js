@@ -25,6 +25,18 @@ function formatDateISO(dateStr) {
 function buildRows(enq) {
   const rows = [];
 
+  // ADDED: index enq.partSuppliers by Customer Part No so each part's row can
+  // pull its own list of assigned suppliers (each with its own PO Number).
+  // Handles legacy string[] suppliers too, normalizing them to { name, poNumber }.
+  const partSuppliersMap = {};
+  (Array.isArray(enq.partSuppliers) ? enq.partSuppliers : []).forEach((ps) => {
+    const list = Array.isArray(ps.suppliers) ? ps.suppliers : [];
+    partSuppliersMap[ps.customerPartNo] = list.map((s) =>
+      typeof s === "string" ? { name: s, poNumber: "" } : { name: s.name || "", poNumber: s.poNumber || "" }
+    );
+  });
+  const resolveSuppliers = (partNo) => partSuppliersMap[partNo] || [];
+
   // Resolve parts array — fall back to partMapping for legacy records
   let parts = Array.isArray(enq.parts) && enq.parts.length > 0
     ? enq.parts
@@ -39,6 +51,7 @@ function buildRows(enq) {
       partNo:     parent.customerPartNo   || "—",
       boPartName: parent.boPartName       || "",
       boPartNo:   parent.modifiedBOPartNo || "",
+      suppliers:  resolveSuppliers(parent.customerPartNo), // ADDED
     });
 
     // Every child gets its own separate row — same enquiry info repeated
@@ -49,6 +62,7 @@ function buildRows(enq) {
         partNo:     child.customerPartNo   || "—",
         boPartName: child.boPartName       || "",
         boPartNo:   child.modifiedBOPartNo || "",
+        suppliers:  resolveSuppliers(child.customerPartNo), // ADDED
       });
     });
   });
@@ -60,6 +74,10 @@ function buildRows(enq) {
 function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
   const rows = buildRows(enq);
   const totalRows = rows.length;
+  // ADDED: if this enquiry has any per-part supplier assignments, show Supplier/PO
+  // per row (per part) instead of one merged cell for the whole enquiry — a part
+  // can now have multiple suppliers, so a single shared cell can't represent that.
+  const hasPartSuppliers = rows.some((r) => (r.suppliers || []).length > 0);
 
   return rows.map((row, rIdx) => {
     const isFirst = rIdx === 0;
@@ -116,22 +134,53 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
           )}
         </td>
 
-        {/* ── SUPPLIER (common per enquiry — not repeated per part) ── */}
-        {isFirst && (
-          <td rowSpan={totalRows} className="enq-td enq-td-main">
-            <span className="cell-supplier-link">
-              {enq.poDetails?.supplierName || "—"}
-            </span>
+        {/* ── SUPPLIER ──
+            CHANGE: when this enquiry has per-part supplier assignments, each row shows
+            ITS OWN part's suppliers (a part can have more than one). Legacy enquiries
+            with no partSuppliers data keep the old single merged cell. */}
+        {hasPartSuppliers ? (
+          <td className="enq-td">
+            {row.suppliers && row.suppliers.length > 0 ? (
+              <div className="supplier-cell-list">
+                {row.suppliers.map((s, i) => (
+                  <span className="cell-supplier-link" key={i}>{s.name}</span>
+                ))}
+              </div>
+            ) : (
+              <span className="enq-empty">—</span>
+            )}
           </td>
+        ) : (
+          isFirst && (
+            <td rowSpan={totalRows} className="enq-td enq-td-main">
+              <span className="cell-supplier-link">
+                {enq.poDetails?.supplierName || "—"}
+              </span>
+            </td>
+          )
         )}
 
-        {/* ── PO NUMBER (common per enquiry — not repeated per part) ── */}
-        {isFirst && (
-          <td rowSpan={totalRows} className="enq-td enq-td-main">
-            {enq.poDetails?.poNumber
-              ? <span className="cell-po">{enq.poDetails.poNumber}</span>
-              : "—"}
+        {/* ── PO NUMBER ── same per-row logic as Supplier, paired 1:1 with each supplier above ── */}
+        {hasPartSuppliers ? (
+          <td className="enq-td">
+            {row.suppliers && row.suppliers.length > 0 ? (
+              <div className="supplier-cell-list">
+                {row.suppliers.map((s, i) => (
+                  <span key={i}>{s.poNumber ? <span className="cell-po">{s.poNumber}</span> : <span className="enq-empty">—</span>}</span>
+                ))}
+              </div>
+            ) : (
+              <span className="enq-empty">—</span>
+            )}
           </td>
+        ) : (
+          isFirst && (
+            <td rowSpan={totalRows} className="enq-td enq-td-main">
+              {enq.poDetails?.poNumber
+                ? <span className="cell-po">{enq.poDetails.poNumber}</span>
+                : "—"}
+            </td>
+          )
         )}
 
         {/* ── DATE OF ISSUE (common per enquiry — not repeated per part) ── */}
@@ -353,6 +402,18 @@ export default function EnquiryTable({
         .cell-supplier-link {
           color: #2563EB;
           font-weight: 500;
+        }
+        /* ADDED: stacks multiple supplier names / PO numbers vertically within one cell,
+           so each line lines up with its counterpart in the neighboring column */
+        .supplier-cell-list {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+        .supplier-cell-list .cell-supplier-link,
+        .supplier-cell-list .cell-po,
+        .supplier-cell-list .enq-empty {
+          white-space: nowrap;
         }
         .cell-po {
           display: inline-block;

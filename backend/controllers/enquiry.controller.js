@@ -33,16 +33,13 @@ exports.createEnquiry = async (req, res) => {
       data.enquiryNumber = await generateEnquiryNumber();
     }
 
-    const existing = await Enquiry.findOne({ enquiryNumber: data.enquiryNumber });
-    if (existing) {
-      return res.status(400).json({ message: "Enquiry number already exists" });
-    }
-data.generatedBy = req.user?.name || data.generatedBy || "System";
+    data.generatedBy = req.user?.name || data.generatedBy || "System";
+
     data.editHistory = [{
       section: "BO / Enquiry Details",
       sectionColor: "bo",
       description: "Enquiry record created",
-    user: data.generatedBy, 
+      user: data.generatedBy || "System",
       timestamp: new Date(),
     }];
 
@@ -76,9 +73,29 @@ exports.getAllEnquiries = async (req, res) => {
     const filter = {};
 
     if (customerName) filter.customerName = { $regex: customerName, $options: "i" };
-    if (supplierName) filter["poDetails.supplierName"] = { $regex: supplierName, $options: "i" };
+    if (supplierName) {
+      const supplierRegex = { $regex: supplierName, $options: "i" };
+      filter.$and = (filter.$and || []).concat([
+        {
+          $or: [
+            { "poDetails.supplierName": supplierRegex },
+            { "poDetailsList.supplierName": supplierRegex },
+          ],
+        },
+      ]);
+    }
     if (inquiryNumber) filter.enquiryNumber = { $regex: inquiryNumber, $options: "i" };
-    if (poNumber) filter["poDetails.poNumber"] = { $regex: poNumber, $options: "i" };
+    if (poNumber) {
+      const poRegex = { $regex: poNumber, $options: "i" };
+      filter.$and = (filter.$and || []).concat([
+        {
+          $or: [
+            { "poDetails.poNumber": poRegex },
+            { "poDetailsList.poNumber": poRegex },
+          ],
+        },
+      ]);
+    }
     if (partNumber) {
       filter.$or = [
         { "partMapping.customerPartNo": { $regex: partNumber, $options: "i" } },
@@ -101,6 +118,8 @@ exports.getAllEnquiries = async (req, res) => {
         { itemDescription: searchRegex },
         { "poDetails.supplierName": searchRegex },
         { "poDetails.poNumber": searchRegex },
+        { "poDetailsList.supplierName": searchRegex },
+        { "poDetailsList.poNumber": searchRegex },
         { "partMapping.customerPartNo": searchRegex },
         { "partMapping.customerPartName": searchRegex },
         { generatedBy: searchRegex },
@@ -148,8 +167,30 @@ exports.getEnquiryStats = async (req, res) => {
     });
 
     const suppliersAgg = await Enquiry.aggregate([
-      { $match: { "poDetails.supplierName": { $exists: true, $ne: "" } } },
-      { $group: { _id: "$poDetails.supplierName" } },
+      {
+        $project: {
+          allSuppliers: {
+            $setUnion: [
+              {
+                $cond: [
+                  { $in: ["$poDetails.supplierName", [null, ""]] },
+                  [],
+                  ["$poDetails.supplierName"],
+                ],
+              },
+              {
+                $filter: {
+                  input: { $ifNull: ["$poDetailsList.supplierName", []] },
+                  as: "s",
+                  cond: { $and: [{ $ne: ["$$s", null] }, { $ne: ["$$s", ""] }] },
+                },
+              },
+            ],
+          },
+        },
+      },
+      { $unwind: "$allSuppliers" },
+      { $group: { _id: "$allSuppliers" } },
       { $count: "count" },
     ]);
     const activeSuppliers = suppliersAgg.length > 0 ? suppliersAgg[0].count : 0;
@@ -165,12 +206,17 @@ exports.getEnquiryStats = async (req, res) => {
 exports.getFilterOptions = async (req, res) => {
   try {
     const customers = await Enquiry.distinct("customerName");
-    const suppliers = await Enquiry.distinct("poDetails.supplierName");
+    const legacySuppliers = await Enquiry.distinct("poDetails.supplierName");
+    const multiSuppliers = await Enquiry.distinct("poDetailsList.supplierName");
     const generatedByList = await Enquiry.distinct("generatedBy");
+
+    const suppliers = Array.from(
+      new Set([...legacySuppliers, ...multiSuppliers].filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
 
     res.json({
       customers: customers.filter(Boolean),
-      suppliers: suppliers.filter(Boolean),
+      suppliers,
       generatedByList: generatedByList.filter(Boolean),
     });
   } catch (err) {
@@ -199,8 +245,7 @@ exports.updateEnquiry = async (req, res) => {
 
     const data = req.body;
     const now = new Date();
-    const user = req.user?.name || data.generatedBy || current.generatedBy || "System";  // CHANGED
- data.generatedBy = user; 
+    const user = data.generatedBy || current.generatedBy || "System";
     const newEntries = [];
 
     // Helper: normalize a value to a comparable string
@@ -234,7 +279,30 @@ exports.updateEnquiry = async (req, res) => {
       }
     }
 
-    // Detect PO changes
+    // Detect Parts (multi part / child part) changes
+    if (data.parts) {
+      const normalizeParts = (arr) =>
+        JSON.stringify(
+          (arr || []).map((p) => ({
+            customerPartNo: norm(p.customerPartNo),
+            customerPartName: norm(p.customerPartName),
+            modifiedBOPartNo: norm(p.modifiedBOPartNo),
+            boPartName: norm(p.boPartName),
+            children: (p.children || []).map((c) => ({
+              customerPartNo: norm(c.customerPartNo),
+              customerPartName: norm(c.customerPartName),
+              modifiedBOPartNo: norm(c.modifiedBOPartNo),
+              boPartName: norm(c.boPartName),
+            })),
+          }))
+        );
+      if (normalizeParts(data.parts) !== normalizeParts(current.parts)) {
+        newEntries.push({ section: "Part Number Mapping", sectionColor: "part", description: "Updated Parts Details (parent/child parts)", user, timestamp: now });
+      }
+    }
+
+    // Detect PO changes (legacy single supplier/PO)
+    let poChanged = false;
     if (data.poDetails) {
       const pd = data.poDetails;
       const cp = current.poDetails || {};
@@ -243,8 +311,28 @@ exports.updateEnquiry = async (req, res) => {
         norm(pd.poNumber) !== norm(cp.poNumber) ||
         normDate(pd.dateOfIssue) !== normDate(cp.dateOfIssue)
       ) {
-        newEntries.push({ section: "PO Number Details", sectionColor: "po", description: "Updated PO Number Details", user, timestamp: now });
+        poChanged = true;
       }
+    }
+
+    // Detect PO changes (multi supplier / PO entries)
+    if (data.poDetailsList) {
+      const normalizePOs = (arr) =>
+        JSON.stringify(
+          (arr || []).map((p) => ({
+            supplierName: norm(p.supplierName),
+            poNumber: norm(p.poNumber),
+            dateOfIssue: normDate(p.dateOfIssue),
+            linkedPartNo: norm(p.linkedPartNo),
+          }))
+        );
+      if (normalizePOs(data.poDetailsList) !== normalizePOs(current.poDetailsList)) {
+        poChanged = true;
+      }
+    }
+
+    if (poChanged) {
+      newEntries.push({ section: "PO Number Details", sectionColor: "po", description: "Updated PO Number Details", user, timestamp: now });
     }
 
     // Always push at least one entry so every save is recorded

@@ -636,6 +636,22 @@ export default function CreateEnquiryModal({
     }
     setPartsError("");
 
+    // ADDED: if the user typed a supplier name/PO but never clicked "Add Supplier"
+    // (or pressed Enter), that draft text would otherwise be silently lost on save.
+    // Auto-commit any non-empty leftover drafts into the supplier list here, per part,
+    // right before the payload is built — without mutating existing entries.
+    const effectivePartSuppliers = { ...partSuppliers };
+    parts.forEach((p) => {
+      const draftName = (supplierDraft[p.id] || "").trim();
+      if (!draftName) return; // nothing left in the input for this part — nothing to do
+      const draftPo = (supplierPoDraft[p.id] || "").trim();
+      const current = effectivePartSuppliers[p.id] || [];
+      const alreadyExists = current.some((s) => s.name.toLowerCase() === draftName.toLowerCase());
+      if (!alreadyExists) {
+        effectivePartSuppliers[p.id] = [...current, { name: draftName, poNumber: draftPo }];
+      }
+    });
+
     // Clean UI-only fields (id/collapsed) before sending to the API.
     const cleanParts = parts.map(({ id, collapsed, children, childDecision, ...rest }) => ({
       ...rest,
@@ -671,9 +687,10 @@ export default function CreateEnquiryModal({
       },
       // Multiple suppliers assigned per Part, keyed by that part's Customer Part No.
       // Each supplier now carries its own poNumber alongside its name.
+      // CHANGE: reads from effectivePartSuppliers (includes any auto-committed drafts above).
       partSuppliers: parts.map((p) => ({
         customerPartNo: p.customerPartNo || "",
-        suppliers: partSuppliers[p.id] || [],
+        suppliers: effectivePartSuppliers[p.id] || [],
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;

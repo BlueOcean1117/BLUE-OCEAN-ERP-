@@ -97,9 +97,6 @@ function derivePrefix(name) {
 /* ─────────────────────────────────────────────
    Helper: extract first/last N digits from part no
 ───────────────────────────────────────────── */
-/* ─────────────────────────────────────────────
-   Helper: extract first/last N digits from part no
-───────────────────────────────────────────── */
 function extractDigits(partNo, position = "first", count = 3) {
   if (!partNo) return "0".repeat(count);
   // Step 1: replace every symbol with "0", keep alphabets and numbers as-is
@@ -119,7 +116,6 @@ function extractDigits(partNo, position = "first", count = 3) {
 /* ─────────────────────────────────────────────
    BO Part Number Builder Drawer Component
 ───────────────────────────────────────────── */
-// CHANGE 3: Prefix type is now constant "B" — removed PREFIX_OPTIONS
 const COMPANY_CODES  = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA",];
 const FIXED_PREFIX   = "B";
 
@@ -129,7 +125,6 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
 
   /* configurable state */
   const [customerPrefix, setCustomerPrefix] = useState("");
-  // CHANGE 3: prefixType removed — always "B"
   const [companyCode,    setCompanyCode]    = useState("ZET");
   const [customCode,     setCustomCode]     = useState("");
   const [first3,         setFirst3]         = useState("");
@@ -171,7 +166,7 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
   const customerName   = snapshot.customerName;
   const customerPartNo = snapshot.customerPartNo;
 
-  /* live preview — CHANGE 3: uses FIXED_PREFIX "B" instead of resolvedPrefix */
+  /* live preview */
   const resolvedCode   = companyCode === "Custom" ? customCode  : companyCode;
   const generatedPartNo = `${customerPrefix}${FIXED_PREFIX}${first3}${resolvedCode}${last3}`;
 
@@ -260,7 +255,7 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
                 />
               </div>
 
-              {/* CHANGE 3: Prefix Type — now a static readonly display, always "B" */}
+              {/* Prefix Type — static readonly display, always "B" */}
               <div className="bo-config-field">
                 <label>Prefix Type</label>
                 <input
@@ -283,7 +278,7 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
                 />
               </div>
 
-              {/* CHANGE 2: Renamed "Company Code" → "Process Code" */}
+              {/* Process Code */}
               <div className="bo-config-field">
                 <label>Process Code</label>
                 <select value={companyCode} onChange={e => setCompanyCode(e.target.value)}>
@@ -338,8 +333,6 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
               </div>
             </div>
           </div>
-
-          {/* CHANGE 1: Suggested Formats section REMOVED */}
 
         </div>
 
@@ -400,8 +393,10 @@ export default function CreateEnquiryModal({
   onSubmit,
   editData,
   isSubmitting,
+  existingSuppliers, // optional string[] — powers the supplier suggestion dropdown
 }) {
   const isEdit = !!editData;
+  const supplierOptions = Array.isArray(existingSuppliers) ? existingSuppliers : [];
 
   const getInitialForm = () => {
     if (editData) {
@@ -484,15 +479,33 @@ export default function CreateEnquiryModal({
   const [partsError, setPartsError]     = useState("");
   const [showBOPanel, setShowBOPanel]   = useState(false);
   const [boTarget, setBoTarget]         = useState(null); // { parentId, childId }
+  const [supplierDraft, setSupplierDraft] = useState({}); // { [partId]: "supplier name being typed" }
+  const [supplierPoDraft, setSupplierPoDraft] = useState({}); // ADDED: { [partId]: "PO number being typed" }
+  const [partSuppliers, setPartSuppliers] = useState({}); // { [partId]: [{ name, poNumber }] }
 
   useEffect(() => {
     if (isOpen) {
       setForm(getInitialForm());
-      setParts(getInitialParts());
+      const initialParts = getInitialParts();
+      setParts(initialParts);
       setPartsError("");
       setActiveTab("bo");
       setShowBOPanel(false);
       setBoTarget(null);
+      setSupplierDraft({});
+      setSupplierPoDraft({}); // ADDED
+      // Hydrate per-part supplier assignments, matched by Customer Part No.
+      // ADDED: normalize legacy string[] suppliers into { name, poNumber } objects.
+      const savedPS = Array.isArray(editData?.partSuppliers) ? editData.partSuppliers : [];
+      const hydrated = {};
+      initialParts.forEach((p) => {
+        const match = savedPS.find((s) => s.customerPartNo === p.customerPartNo);
+        const rawSuppliers = match ? match.suppliers || [] : [];
+        hydrated[p.id] = rawSuppliers.map((s) =>
+          typeof s === "string" ? { name: s, poNumber: "" } : { name: s.name || "", poNumber: s.poNumber || "" }
+        );
+      });
+      setPartSuppliers(hydrated);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, editData]);
@@ -518,7 +531,7 @@ export default function CreateEnquiryModal({
   const addChildPart = (parentId) =>
     setParts((prev) =>
       prev.map((p) =>
-        p.id === parentId ? { ...p, children: [...p.children, makeEmptyChildPart()] } : p
+        p.id === parentId ? { ...p, children: [...(p.children || []), makeEmptyChildPart()] } : p
       )
     );
 
@@ -528,10 +541,31 @@ export default function CreateEnquiryModal({
       prev.map((p) => (p.id === parentId ? { ...p, childDecision: decision } : p))
     );
 
+  /* ── Supplier assignment — a Part can have multiple suppliers, each with its own PO Number (PO Details tab) ── */
+  const addSupplierToPart = (partId, rawValue, rawPoNumber) => { // CHANGE: added rawPoNumber param
+    const value = (rawValue || "").trim();
+    if (!value) return;
+    const poNumber = (rawPoNumber || "").trim(); // ADDED
+    setPartSuppliers((prev) => {
+      const current = prev[partId] || [];
+      // avoid case-insensitive duplicates on supplier name
+      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) return prev;
+      return { ...prev, [partId]: [...current, { name: value, poNumber }] }; // CHANGE: store as object
+    });
+    setSupplierDraft((prev) => ({ ...prev, [partId]: "" }));
+    setSupplierPoDraft((prev) => ({ ...prev, [partId]: "" })); // ADDED
+  };
+
+  const removeSupplierFromPart = (partId, supplierName) =>
+    setPartSuppliers((prev) => ({
+      ...prev,
+      [partId]: (prev[partId] || []).filter((s) => s.name !== supplierName), // CHANGE: compare s.name
+    }));
+
   const removeChildPart = (parentId, childId) =>
     setParts((prev) =>
       prev.map((p) =>
-        p.id === parentId ? { ...p, children: p.children.filter((c) => c.id !== childId) } : p
+        p.id === parentId ? { ...p, children: (p.children || []).filter((c) => c.id !== childId) } : p
       )
     );
 
@@ -539,7 +573,7 @@ export default function CreateEnquiryModal({
     setParts((prev) =>
       prev.map((p) =>
         p.id === parentId
-          ? { ...p, children: p.children.map((c) => (c.id === childId ? { ...c, [field]: value } : c)) }
+          ? { ...p, children: (p.children || []).map((c) => (c.id === childId ? { ...c, [field]: value } : c)) }
           : p
       )
     );
@@ -564,7 +598,7 @@ export default function CreateEnquiryModal({
     const parent = parts.find((p) => p.id === boTarget.parentId);
     if (!parent) return "";
     if (boTarget.childId) {
-      const child = parent.children.find((c) => c.id === boTarget.childId);
+      const child = (parent.children || []).find((c) => c.id === boTarget.childId);
       return child ? child.customerPartNo : "";
     }
     return parent.customerPartNo;
@@ -581,7 +615,7 @@ export default function CreateEnquiryModal({
       if (seen.has(key)) return `Duplicate part number found: "${p.customerPartNo}". Part numbers must be unique within an enquiry.`;
       seen.add(key);
 
-      for (const c of p.children) {
+      for (const c of (p.children || [])) {
         if (!c.customerPartNo || !c.customerPartNo.trim()) {
           return "Child Part Number is mandatory for every child part added.";
         }
@@ -635,6 +669,12 @@ export default function CreateEnquiryModal({
         poNumber: form.poNumber,
         dateOfIssue: form.dateOfIssue || null,
       },
+      // Multiple suppliers assigned per Part, keyed by that part's Customer Part No.
+      // Each supplier now carries its own poNumber alongside its name.
+      partSuppliers: parts.map((p) => ({
+        customerPartNo: p.customerPartNo || "",
+        suppliers: partSuppliers[p.id] || [],
+      })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
     onSubmit(payload);
@@ -691,7 +731,7 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          padding: 20px 20px 16px;
+          padding: 16px 18px 14px; /* COMPACTED from 20px 20px 16px */
           border-bottom: 1px solid #f0f0f0;
           background: linear-gradient(135deg, #f8f5ff 0%, #fdf4ff 100%);
           flex-shrink: 0;
@@ -702,8 +742,8 @@ export default function CreateEnquiryModal({
           gap: 12px;
         }
         .bo-drawer-title-icon {
-          width: 36px;
-          height: 36px;
+          width: 34px;
+          height: 34px;
           border-radius: 10px;
           background: linear-gradient(135deg, #7c3aed, #a855f7);
           display: flex;
@@ -714,21 +754,21 @@ export default function CreateEnquiryModal({
         }
         .bo-drawer-title h3 {
           margin: 0 0 2px;
-          font-size: 15px;
+          font-size: 14.5px;
           font-weight: 700;
           color: #1e1b4b;
         }
         .bo-drawer-title p {
           margin: 0;
-          font-size: 11.5px;
+          font-size: 11px;
           color: #6b7280;
         }
         .bo-drawer-close {
           border: none;
           background: #f3f4f6;
           border-radius: 8px;
-          width: 30px;
-          height: 30px;
+          width: 28px;
+          height: 28px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -743,10 +783,10 @@ export default function CreateEnquiryModal({
         .bo-drawer-body {
           flex: 1;
           overflow-y: auto;
-          padding: 16px 20px;
+          padding: 14px 18px; /* COMPACTED from 16px 20px */
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 14px; /* COMPACTED from 18px */
         }
         .bo-drawer-body::-webkit-scrollbar { width: 5px; }
         .bo-drawer-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
@@ -756,18 +796,18 @@ export default function CreateEnquiryModal({
           background: #fafafa;
           border: 1px solid #f0f0f0;
           border-radius: 12px;
-          padding: 14px 16px;
+          padding: 12px 14px; /* COMPACTED from 14px 16px */
         }
         .bo-drawer-section-label {
           display: flex;
           align-items: center;
           gap: 7px;
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.08em;
           color: #6b7280;
-          margin-bottom: 12px;
+          margin-bottom: 10px; /* COMPACTED from 12px */
         }
         .bo-ds-dot {
           width: 7px;
@@ -784,7 +824,7 @@ export default function CreateEnquiryModal({
         .bo-fetch-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 8px;
+          gap: 7px; /* COMPACTED from 8px */
         }
         .bo-fetch-item {
           display: flex;
@@ -793,39 +833,39 @@ export default function CreateEnquiryModal({
           background: #fff;
           border: 1px solid #e5e7eb;
           border-radius: 8px;
-          padding: 8px 10px;
+          padding: 7px 9px; /* COMPACTED from 8px 10px */
         }
         .bo-fetch-key {
-          font-size: 10px;
+          font-size: 9.5px;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.06em;
           color: #9ca3af;
         }
         .bo-fetch-val {
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 600;
           color: #374151;
         }
         .bo-fetch-val em { font-style: italic; font-weight: 400; color: #9ca3af; }
         .bo-fetch-val.highlight {
           color: #7c3aed;
-          font-size: 14px;
+          font-size: 13.5px;
         }
 
         /* Config grid */
         .bo-config-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          gap: 9px; /* COMPACTED from 10px */
         }
         .bo-config-field {
           display: flex;
           flex-direction: column;
-          gap: 5px;
+          gap: 4px; /* COMPACTED from 5px */
         }
         .bo-config-field label {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 600;
           color: #374151;
           text-transform: uppercase;
@@ -835,8 +875,8 @@ export default function CreateEnquiryModal({
         .bo-config-field select {
           border: 1.5px solid #e5e7eb;
           border-radius: 7px;
-          padding: 7px 10px;
-          font-size: 13px;
+          padding: 6px 9px; /* COMPACTED from 7px 10px */
+          font-size: 12.5px;
           color: #111;
           background: #fff;
           outline: none;
@@ -858,31 +898,31 @@ export default function CreateEnquiryModal({
           background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
           border: 1.5px solid #a7f3d0;
           border-radius: 10px;
-          padding: 14px 16px;
+          padding: 12px 14px; /* COMPACTED from 14px 16px */
           text-align: center;
         }
         .bo-preview-label {
           display: block;
-          font-size: 10.5px;
+          font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.08em;
           color: #059669;
-          margin-bottom: 8px;
+          margin-bottom: 7px; /* COMPACTED from 8px */
         }
         .bo-preview-value {
-          font-size: 22px;
+          font-size: 20px; /* COMPACTED from 22px */
           font-weight: 800;
           color: #065f46;
           letter-spacing: 0.06em;
-          margin-bottom: 10px;
-          min-height: 32px;
+          margin-bottom: 8px; /* COMPACTED from 10px */
+          min-height: 30px;
           display: flex;
           align-items: center;
           justify-content: center;
         }
         .bo-preview-empty {
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 400;
           color: #9ca3af;
           font-style: italic;
@@ -909,7 +949,7 @@ export default function CreateEnquiryModal({
 
         /* Footer */
         .bo-drawer-footer {
-          padding: 14px 20px;
+          padding: 12px 18px; /* COMPACTED from 14px 20px */
           border-top: 1px solid #f0f0f0;
           display: flex;
           gap: 10px;
@@ -918,12 +958,12 @@ export default function CreateEnquiryModal({
         }
         .bo-drawer-cancel {
           flex: 1;
-          padding: 10px;
+          padding: 9px; /* COMPACTED from 10px */
           border: 1.5px solid #e5e7eb;
           border-radius: 9px;
           background: #fff;
           color: #374151;
-          font-size: 13.5px;
+          font-size: 13px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.15s;
@@ -931,12 +971,12 @@ export default function CreateEnquiryModal({
         .bo-drawer-cancel:hover { background: #f9fafb; border-color: #d1d5db; }
         .bo-drawer-apply {
           flex: 2;
-          padding: 10px 16px;
+          padding: 9px 16px; /* COMPACTED from 10px 16px */
           border: none;
           border-radius: 9px;
           background: linear-gradient(135deg, #7c3aed, #a855f7);
           color: #fff;
-          font-size: 13.5px;
+          font-size: 13px;
           font-weight: 700;
           cursor: pointer;
           display: flex;
@@ -962,8 +1002,8 @@ export default function CreateEnquiryModal({
           background: #f5f3ff;
           border: 1.5px solid #a78bfa;
           border-radius: 8px;
-          padding: 8px 12px;
-          font-size: 13.5px;
+          padding: 7px 11px; /* COMPACTED from 8px 12px */
+          font-size: 13px;
           font-weight: 700;
           color: #5b21b6;
           letter-spacing: 0.04em;
@@ -983,12 +1023,12 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 9px 14px;
+          padding: 8px 14px; /* COMPACTED from 9px 14px */
           border: 1.5px dashed #a78bfa;
           border-radius: 8px;
           background: #faf5ff;
           color: #7c3aed;
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.15s;
@@ -1001,8 +1041,8 @@ export default function CreateEnquiryModal({
           box-shadow: 0 2px 8px rgba(124,58,237,0.12);
         }
         .bo-generate-btn-icon {
-          width: 24px;
-          height: 24px;
+          width: 22px;
+          height: 22px;
           border-radius: 6px;
           background: linear-gradient(135deg, #7c3aed, #a855f7);
           display: flex;
@@ -1023,12 +1063,12 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 8px 14px;
+          padding: 7px 13px; /* COMPACTED from 8px 14px */
           border: none;
           border-radius: 8px;
           background: linear-gradient(135deg, #7c3aed, #a855f7);
           color: #fff;
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 700;
           cursor: pointer;
           transition: opacity 0.15s, transform 0.12s;
@@ -1038,11 +1078,11 @@ export default function CreateEnquiryModal({
         }
         .add-part-btn:hover { opacity: 0.92; transform: translateY(-1px); }
         .add-part-btn-bottom {
-          margin: 16px 0 0;
+          margin: 12px 0 0; /* COMPACTED from 16px 0 0 */
           width: 100%;
           justify-content: center;
-          padding: 11px 14px;
-          font-size: 13px;
+          padding: 9px 14px; /* COMPACTED from 11px 14px */
+          font-size: 12.5px;
         }
 
         .parts-error-banner {
@@ -1052,11 +1092,11 @@ export default function CreateEnquiryModal({
           background: #fef2f2;
           border: 1.5px solid #fecaca;
           color: #b91c1c;
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 600;
           border-radius: 8px;
-          padding: 10px 14px;
-          margin-bottom: 14px;
+          padding: 9px 13px; /* COMPACTED from 10px 14px */
+          margin-bottom: 12px; /* COMPACTED from 14px */
           position: relative;
           z-index: 1;
         }
@@ -1065,10 +1105,10 @@ export default function CreateEnquiryModal({
           background: rgba(255,255,255,0.7);
           border: 1.5px dashed #c4b5fd;
           border-radius: 10px;
-          padding: 24px;
+          padding: 20px; /* COMPACTED from 24px */
           text-align: center;
           color: #6b7280;
-          font-size: 13.5px;
+          font-size: 13px;
           position: relative;
           z-index: 1;
         }
@@ -1076,7 +1116,7 @@ export default function CreateEnquiryModal({
         .parts-list {
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 11px; /* COMPACTED from 14px */
           position: relative;
           z-index: 1;
         }
@@ -1093,15 +1133,15 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 12px 14px;
+          padding: 10px 13px; /* COMPACTED from 12px 14px */
           background: linear-gradient(135deg, #f5f3ff, #f3e8ff);
           border-bottom: 1px solid #ede9fe;
         }
         .part-collapse-btn {
           border: none;
           background: #fff;
-          width: 26px;
-          height: 26px;
+          width: 25px;
+          height: 25px;
           border-radius: 7px;
           display: flex;
           align-items: center;
@@ -1124,9 +1164,9 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: center;
           gap: 5px;
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 700;
-          padding: 4px 10px;
+          padding: 4px 9px; /* COMPACTED from 4px 10px */
           border-radius: 999px;
           flex-shrink: 0;
         }
@@ -1140,7 +1180,7 @@ export default function CreateEnquiryModal({
         }
 
         .part-card-summary {
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 700;
           color: #4c1d95;
           overflow: hidden;
@@ -1149,12 +1189,12 @@ export default function CreateEnquiryModal({
         }
 
         .child-count-chip {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 600;
           color: #7c3aed;
           background: #fff;
           border: 1px solid #ddd6fe;
-          padding: 3px 9px;
+          padding: 3px 8px; /* COMPACTED from 3px 9px */
           border-radius: 999px;
           flex-shrink: 0;
         }
@@ -1170,9 +1210,9 @@ export default function CreateEnquiryModal({
           border: 1.5px solid #fecaca;
           background: #fff;
           color: #dc2626;
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 700;
-          padding: 6px 10px;
+          padding: 5px 9px; /* COMPACTED from 6px 10px */
           border-radius: 7px;
           cursor: pointer;
           transition: all 0.15s;
@@ -1185,17 +1225,17 @@ export default function CreateEnquiryModal({
         }
 
         .part-card-body {
-          padding: 16px;
+          padding: 13px; /* COMPACTED from 16px */
         }
 
         /* Child parts nested tree */
         .child-parts-wrap {
           margin-top: 6px;
-          padding-left: 22px;
+          padding-left: 20px; /* COMPACTED from 22px */
           border-left: 2px dashed #ddd6fe;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px; /* COMPACTED from 12px */
         }
         .child-part-row {
           display: flex;
@@ -1215,19 +1255,19 @@ export default function CreateEnquiryModal({
           background: #faf9ff;
           border: 1.5px solid #ede9fe;
           border-radius: 10px;
-          padding: 12px;
+          padding: 10px; /* COMPACTED from 12px */
         }
         .child-part-header {
           display: flex;
           align-items: center;
           gap: 8px;
-          margin-bottom: 10px;
+          margin-bottom: 9px; /* COMPACTED from 10px */
         }
         .child-part-header .remove-child-btn {
           margin-left: auto;
         }
         .child-fields-grid {
-          margin-bottom: 10px;
+          margin-bottom: 9px; /* COMPACTED from 10px */
         }
         .child-fields-grid .tab-field-card {
           background: #fff;
@@ -1238,12 +1278,12 @@ export default function CreateEnquiryModal({
           align-items: center;
           justify-content: center;
           gap: 6px;
-          padding: 9px 14px;
+          padding: 8px 13px; /* COMPACTED from 9px 14px */
           border: 1.5px dashed #a78bfa;
           border-radius: 8px;
           background: #fff;
           color: #7c3aed;
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 700;
           cursor: pointer;
           transition: all 0.15s;
@@ -1257,16 +1297,16 @@ export default function CreateEnquiryModal({
         /* Child Part Yes/No confirmation prompt */
         .child-confirm-box {
           margin-top: 6px;
-          padding: 12px 14px;
+          padding: 11px 13px; /* COMPACTED from 12px 14px */
           background: #faf9ff;
           border: 1.5px dashed #ddd6fe;
           border-radius: 10px;
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 9px; /* COMPACTED from 10px */
         }
         .child-confirm-text {
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 600;
           color: #4c1d95;
         }
@@ -1279,9 +1319,9 @@ export default function CreateEnquiryModal({
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 7px 16px;
+          padding: 6px 15px; /* COMPACTED from 7px 16px */
           border-radius: 7px;
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 700;
           cursor: pointer;
           transition: all 0.15s;
@@ -1307,11 +1347,11 @@ export default function CreateEnquiryModal({
           align-items: center;
           justify-content: space-between;
           gap: 10px;
-          padding: 9px 14px;
+          padding: 8px 13px; /* COMPACTED from 9px 14px */
           background: #f9fafb;
           border: 1px dashed #e5e7eb;
           border-radius: 8px;
-          font-size: 12px;
+          font-size: 11.5px;
           color: #6b7280;
         }
         .child-decision-change-btn {
@@ -1334,6 +1374,152 @@ export default function CreateEnquiryModal({
           .part-card-header { flex-wrap: wrap; }
           .child-parts-wrap { padding-left: 12px; }
         }
+
+        /* ─────────────────────────────────────────────
+           Supplier assignment (PO Details tab)
+        ───────────────────────────────────────────── */
+        .supplier-assign-section {
+          margin-top: 14px; /* COMPACTED from 18px */
+          padding-top: 13px; /* COMPACTED from 16px */
+          border-top: 1.5px dashed #e5e7eb;
+        }
+        .supplier-assign-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12.5px;
+          font-weight: 700;
+          color: #065f46;
+          margin-bottom: 10px; /* COMPACTED from 12px */
+        }
+        .supplier-assign-empty {
+          background: rgba(255,255,255,0.7);
+          border: 1.5px dashed #a7f3d0;
+          border-radius: 10px;
+          padding: 15px; /* COMPACTED from 18px */
+          text-align: center;
+          color: #6b7280;
+          font-size: 12.5px;
+        }
+        .supplier-part-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px; /* COMPACTED from 12px */
+        }
+        .supplier-part-row {
+          background: #fff;
+          border: 1.5px solid #bbf7d0;
+          border-radius: 10px;
+          padding: 10px 13px; /* COMPACTED from 12px 14px */
+        }
+        .supplier-part-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 9px; /* COMPACTED from 10px */
+        }
+        .supplier-part-no {
+          font-size: 12px;
+          font-weight: 700;
+          color: #15803d;
+        }
+        .supplier-chip-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-bottom: 9px; /* COMPACTED from 10px */
+          min-height: 22px;
+        }
+        .supplier-chip-empty {
+          font-size: 11.5px;
+          color: #9ca3af;
+          font-style: italic;
+        }
+        .supplier-chip {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: #d1fae5;
+          color: #065f46;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 4px 6px 4px 10px;
+          border-radius: 999px;
+        }
+        /* ADDED: visually separates the PO number from the supplier name inside the chip */
+        .supplier-chip-po {
+          font-weight: 600;
+          color: #047857;
+          opacity: 0.85;
+        }
+        .supplier-chip-remove {
+          border: none;
+          background: none;
+          cursor: pointer;
+          color: #065f46;
+          opacity: 0.6;
+          display: flex;
+          align-items: center;
+          padding: 2px;
+          border-radius: 50%;
+          transition: all 0.15s;
+        }
+        .supplier-chip-remove:hover { opacity: 1; background: rgba(6,95,70,0.12); }
+        .supplier-input-row {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap; /* ADDED: lets the row wrap to 2 lines on narrow widths instead of squeezing */
+        }
+        .supplier-input {
+          flex: 1 1 160px; /* CHANGE: was flex: 1 — now shares space with the new PO input */
+          min-width: 140px;
+          border: 1.5px solid #e5e7eb;
+          border-radius: 7px;
+          padding: 7px 9px; /* COMPACTED from 8px 10px */
+          font-size: 12.5px;
+          color: #111;
+          background: #fff;
+          outline: none;
+          transition: border-color 0.15s;
+        }
+        .supplier-input:focus {
+          border-color: #10b981;
+          box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+        }
+        /* ADDED: PO Number input, styled to match the supplier name input */
+        .supplier-po-input {
+          flex: 1 1 130px;
+          min-width: 110px;
+          border: 1.5px solid #e5e7eb;
+          border-radius: 7px;
+          padding: 7px 9px;
+          font-size: 12.5px;
+          color: #111;
+          background: #fff;
+          outline: none;
+          transition: border-color 0.15s;
+        }
+        .supplier-po-input:focus {
+          border-color: #10b981;
+          box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+        }
+        .supplier-add-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 13px; /* COMPACTED from 8px 14px */
+          border: none;
+          border-radius: 7px;
+          background: linear-gradient(135deg, #10b981, #34d399);
+          color: #fff;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: opacity 0.15s, transform 0.12s;
+          box-shadow: 0 2px 8px rgba(16,185,129,0.25);
+        }
+        .supplier-add-btn:hover { opacity: 0.92; transform: translateY(-1px); }
       `}</style>
 
       <div className="modal-overlay" onClick={onClose}>
@@ -1456,7 +1642,9 @@ export default function CreateEnquiryModal({
                   </div>
                 ) : (
                   <div className="parts-list">
-                    {parts.map((part, pIdx) => (
+                    {parts.map((part, pIdx) => {
+                      const kids = part.children || []; // guard: never undefined
+                      return (
                       <div className="part-card" key={part.id}>
                         <div className="part-card-header">
                           <button
@@ -1469,8 +1657,8 @@ export default function CreateEnquiryModal({
                           </button>
                           <span className="part-badge parent-badge"><IconParentTag /> Parent Part {pIdx + 1}</span>
                           {part.customerPartNo && <span className="part-card-summary">{part.customerPartNo}</span>}
-                          {part.children.length > 0 && (
-                            <span className="child-count-chip">{part.children.length} child part{part.children.length > 1 ? "s" : ""}</span>
+                          {kids.length > 0 && (
+                            <span className="child-count-chip">{kids.length} child part{kids.length > 1 ? "s" : ""}</span>
                           )}
                           <button
                             type="button"
@@ -1542,9 +1730,9 @@ export default function CreateEnquiryModal({
                             </div>
 
                             {/* ── Child Parts — gated behind a Yes/No confirmation ── */}
-                            {part.children.length > 0 || part.childDecision === "yes" ? (
+                            {kids.length > 0 || part.childDecision === "yes" ? (
                             <div className="child-parts-wrap">
-                              {part.children.map((child, cIdx) => (
+                              {kids.map((child, cIdx) => (
                                 <div className="child-part-row" key={child.id}>
                                   <div className="child-part-connector" />
                                   <div className="child-part-content">
@@ -1664,7 +1852,8 @@ export default function CreateEnquiryModal({
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1701,6 +1890,106 @@ export default function CreateEnquiryModal({
                     <label className="po-label">Date of Issue</label>
                     <input type="date" value={form.dateOfIssue} onChange={(e) => handleChange("dateOfIssue", e.target.value)} />
                   </div>
+                </div>
+
+                {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number ── */}
+                <div className="supplier-assign-section">
+                  <div className="supplier-assign-title">
+                    <IconPO /> Assign Suppliers to Parts
+                  </div>
+
+                  {parts.length === 0 ? (
+                    <div className="supplier-assign-empty">
+                      Add Parts in the "Parts Details" tab first, then assign suppliers here.
+                    </div>
+                  ) : (
+                    <div className="supplier-part-list">
+                      {parts.map((part, pIdx) => {
+                        const supList = partSuppliers[part.id] || [];
+                        const draft = supplierDraft[part.id] || "";
+                        const poDraft = supplierPoDraft[part.id] || ""; // ADDED
+                        return (
+                          <div className="supplier-part-row" key={part.id}>
+                            <div className="supplier-part-label">
+                              <span className="part-badge parent-badge"><IconParentTag /> Parent Part {pIdx + 1}</span>
+                              {part.customerPartNo && <span className="supplier-part-no">{part.customerPartNo}</span>}
+                            </div>
+
+                            <div className="supplier-chip-list">
+                              {supList.length === 0 ? (
+                                <span className="supplier-chip-empty">No suppliers assigned yet</span>
+                              ) : (
+                                supList.map((s) => (
+                                  <span className="supplier-chip" key={s.name}>
+                                    {s.name}
+                                    {/* ADDED: show the PO number tied to this supplier, when present */}
+                                    {s.poNumber ? <span className="supplier-chip-po">· PO {s.poNumber}</span> : null}
+                                    <button
+                                      type="button"
+                                      className="supplier-chip-remove"
+                                      title="Remove supplier"
+                                      onClick={() => removeSupplierFromPart(part.id, s.name)}
+                                    >
+                                      <IconClose />
+                                    </button>
+                                  </span>
+                                ))
+                              )}
+                            </div>
+
+                            <div className="supplier-input-row">
+                              <input
+                                type="text"
+                                list="existing-suppliers-list"
+                                className="supplier-input"
+                                placeholder="Type or pick a supplier"
+                                value={draft}
+                                onChange={(e) =>
+                                  setSupplierDraft((prev) => ({ ...prev, [part.id]: e.target.value }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    addSupplierToPart(part.id, draft, poDraft);
+                                  }
+                                }}
+                              />
+                              {/* ADDED: PO Number input, paired with the supplier being added above */}
+                              <input
+                                type="text"
+                                className="supplier-po-input"
+                                placeholder="PO Number"
+                                value={poDraft}
+                                onChange={(e) =>
+                                  setSupplierPoDraft((prev) => ({ ...prev, [part.id]: e.target.value }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    addSupplierToPart(part.id, draft, poDraft);
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="supplier-add-btn"
+                                onClick={() => addSupplierToPart(part.id, draft, poDraft)}
+                              >
+                                <IconPlus /> Add Supplier
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Shared suggestion list — powers autocomplete for every part's input above */}
+                  <datalist id="existing-suppliers-list">
+                    {supplierOptions.map((s) => (
+                      <option value={s} key={s} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
             )}

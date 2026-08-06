@@ -347,6 +347,7 @@ export default function EnquiryDashboard() {
         onSubmit={handleSubmit}
         editData={editData}
         isSubmitting={isSubmitting}
+        existingSuppliers={filterOptions.suppliers}
       />
 
       {/* View Modal */}

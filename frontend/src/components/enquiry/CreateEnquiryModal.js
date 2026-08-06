@@ -55,6 +55,36 @@ const IconClose = () => (
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
   </svg>
 );
+const IconPlus = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+  </svg>
+);
+const IconTrash = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"/>
+  </svg>
+);
+const IconChevron = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
+);
+const IconParentTag = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="3"/>
+  </svg>
+);
+const IconChildTag = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18l6-6-6-6"/>
+  </svg>
+);
+const IconAlert = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+);
 
 /* ─────────────────────────────────────────────
    Helper: derive prefix from customer name
@@ -332,6 +362,36 @@ function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
 }
 
 /* ─────────────────────────────────────────────
+   Parts Details — helpers
+───────────────────────────────────────────── */
+let __partIdSeq = 0;
+const newPartId = () => `part_${Date.now()}_${(__partIdSeq++)}_${Math.random().toString(36).slice(2, 7)}`;
+
+const makeEmptyPart = () => ({
+  id: newPartId(),
+  customerPartNo: "",
+  customerPartName: "",
+  modifiedBOPartNo: "",
+  boPartName: "",
+  isChildPart: false,
+  collapsed: false,
+  children: [],
+  // "null"  = not yet answered the Yes/No child-part prompt
+  // "yes"   = user chose to add child parts (existing Add Child Part UI shown)
+  // "no"    = user chose to skip child parts for this parent part
+  childDecision: null,
+});
+
+const makeEmptyChildPart = () => ({
+  id: newPartId(),
+  customerPartNo: "",
+  customerPartName: "",
+  modifiedBOPartNo: "",
+  boPartName: "",
+  isChildPart: true,
+});
+
+/* ─────────────────────────────────────────────
    Main Modal
 ───────────────────────────────────────────── */
 export default function CreateEnquiryModal({
@@ -367,15 +427,72 @@ export default function CreateEnquiryModal({
     return { ...EMPTY_FORM };
   };
 
+  /* ── Parts Details: build initial parent/child parts from editData ── */
+  const getInitialParts = () => {
+    if (editData) {
+      // New-format records: use the stored parts hierarchy as-is.
+      if (Array.isArray(editData.parts) && editData.parts.length > 0) {
+        return editData.parts.map((p) => ({
+          id: newPartId(),
+          customerPartNo: p.customerPartNo || "",
+          customerPartName: p.customerPartName || "",
+          modifiedBOPartNo: p.modifiedBOPartNo || "",
+          boPartName: p.boPartName || "",
+          isChildPart: false,
+          collapsed: false,
+          // If this part already has saved child parts, treat the prompt as
+          // already answered "Yes" so existing data keeps displaying as-is.
+          childDecision: Array.isArray(p.children) && p.children.length > 0 ? "yes" : null,
+          children: Array.isArray(p.children)
+            ? p.children.map((c) => ({
+                id: newPartId(),
+                customerPartNo: c.customerPartNo || "",
+                customerPartName: c.customerPartName || "",
+                modifiedBOPartNo: c.modifiedBOPartNo || "",
+                boPartName: c.boPartName || "",
+                isChildPart: true,
+              }))
+            : [],
+        }));
+      }
+      // Backward compatibility: older single-part records only have
+      // `partMapping` — surface it as the first parent part.
+      const pm = editData.partMapping || {};
+      if (pm.customerPartNo || pm.customerPartName || pm.modifiedBOPartNo || pm.boPartName) {
+        return [
+          {
+            id: newPartId(),
+            customerPartNo: pm.customerPartNo || "",
+            customerPartName: pm.customerPartName || "",
+            modifiedBOPartNo: pm.modifiedBOPartNo || "",
+            boPartName: pm.boPartName || "",
+            isChildPart: false,
+            collapsed: false,
+            children: [],
+            childDecision: null,
+          },
+        ];
+      }
+      return [makeEmptyPart()];
+    }
+    return [makeEmptyPart()];
+  };
+
   const [activeTab, setActiveTab]       = useState("bo");
   const [form, setForm]                 = useState(getInitialForm);
+  const [parts, setParts]               = useState(getInitialParts);
+  const [partsError, setPartsError]     = useState("");
   const [showBOPanel, setShowBOPanel]   = useState(false);
+  const [boTarget, setBoTarget]         = useState(null); // { parentId, childId }
 
   useEffect(() => {
     if (isOpen) {
       setForm(getInitialForm());
+      setParts(getInitialParts());
+      setPartsError("");
       setActiveTab("bo");
       setShowBOPanel(false);
+      setBoTarget(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, editData]);
@@ -386,7 +503,120 @@ export default function CreateEnquiryModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  /* ── Parts Details: CRUD helpers ── */
+  const addPart = () => setParts((prev) => [...prev, makeEmptyPart()]);
+
+  const removePart = (id) =>
+    setParts((prev) => prev.filter((p) => p.id !== id));
+
+  const updatePartField = (id, field, value) =>
+    setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+
+  const togglePartCollapse = (id) =>
+    setParts((prev) => prev.map((p) => (p.id === id ? { ...p, collapsed: !p.collapsed } : p)));
+
+  const addChildPart = (parentId) =>
+    setParts((prev) =>
+      prev.map((p) =>
+        p.id === parentId ? { ...p, children: [...p.children, makeEmptyChildPart()] } : p
+      )
+    );
+
+  /* ── Child Part confirmation (Yes/No) — records the user's choice per Parent Part ── */
+  const setChildDecision = (parentId, decision) =>
+    setParts((prev) =>
+      prev.map((p) => (p.id === parentId ? { ...p, childDecision: decision } : p))
+    );
+
+  const removeChildPart = (parentId, childId) =>
+    setParts((prev) =>
+      prev.map((p) =>
+        p.id === parentId ? { ...p, children: p.children.filter((c) => c.id !== childId) } : p
+      )
+    );
+
+  const updateChildField = (parentId, childId, field, value) =>
+    setParts((prev) =>
+      prev.map((p) =>
+        p.id === parentId
+          ? { ...p, children: p.children.map((c) => (c.id === childId ? { ...c, [field]: value } : c)) }
+          : p
+      )
+    );
+
+  /* ── BO Part Number Builder — works against whichever part/child triggered it ── */
+  const openBOBuilder = (parentId, childId = null) => {
+    setBoTarget({ parentId, childId });
+    setShowBOPanel(true);
+  };
+
+  const applyBOPartNo = (value) => {
+    if (!boTarget) return;
+    if (boTarget.childId) {
+      updateChildField(boTarget.parentId, boTarget.childId, "modifiedBOPartNo", value);
+    } else {
+      updatePartField(boTarget.parentId, "modifiedBOPartNo", value);
+    }
+  };
+
+  const getBoTargetCustomerPartNo = () => {
+    if (!boTarget) return "";
+    const parent = parts.find((p) => p.id === boTarget.parentId);
+    if (!parent) return "";
+    if (boTarget.childId) {
+      const child = parent.children.find((c) => c.id === boTarget.childId);
+      return child ? child.customerPartNo : "";
+    }
+    return parent.customerPartNo;
+  };
+
+  /* ── Validation: parent part no mandatory, child part no mandatory if added, no duplicates ── */
+  const validateParts = () => {
+    const seen = new Set();
+    for (const p of parts) {
+      if (!p.customerPartNo || !p.customerPartNo.trim()) {
+        return "Parent Part Number (Customer Part No) is mandatory for every part added.";
+      }
+      const key = p.customerPartNo.trim().toLowerCase();
+      if (seen.has(key)) return `Duplicate part number found: "${p.customerPartNo}". Part numbers must be unique within an enquiry.`;
+      seen.add(key);
+
+      for (const c of p.children) {
+        if (!c.customerPartNo || !c.customerPartNo.trim()) {
+          return "Child Part Number is mandatory for every child part added.";
+        }
+        const ckey = c.customerPartNo.trim().toLowerCase();
+        if (seen.has(ckey)) return `Duplicate part number found: "${c.customerPartNo}". Part numbers must be unique within an enquiry.`;
+        seen.add(ckey);
+      }
+    }
+    return "";
+  };
+
   const handleSubmit = () => {
+    const validationMessage = validateParts();
+    if (validationMessage) {
+      setPartsError(validationMessage);
+      setActiveTab("parts");
+      return;
+    }
+    setPartsError("");
+
+    // Clean UI-only fields (id/collapsed) before sending to the API.
+    const cleanParts = parts.map(({ id, collapsed, children, childDecision, ...rest }) => ({
+      ...rest,
+      isChildPart: false,
+      children: (children || []).map(({ id: childId, ...childRest }) => ({
+        ...childRest,
+        isChildPart: true,
+      })),
+    }));
+
+    // Mirror the first parent part into `partMapping` so every existing
+    // API consumer (list, search, stats, table) that reads partMapping.*
+    // keeps working exactly as before, unchanged.
+    const firstPart = parts[0] || {};
+
     const payload = {
       customerName: form.customerName,
       customerRFQDate: form.customerRFQDate || null,
@@ -394,11 +624,12 @@ export default function CreateEnquiryModal({
       enquiryNumber:
         form.enquiryNumberMode === "auto" ? "auto" : form.enquiryNumber,
       partMapping: {
-        customerPartNo: form.customerPartNo,
-        customerPartName: form.customerPartName,
-        modifiedBOPartNo: form.modifiedBOPartNo,
-        boPartName: form.boPartName,
+        customerPartNo: firstPart.customerPartNo || "",
+        customerPartName: firstPart.customerPartName || "",
+        modifiedBOPartNo: firstPart.modifiedBOPartNo || "",
+        boPartName: firstPart.boPartName || "",
       },
+      parts: cleanParts,
       poDetails: {
         supplierName: form.supplierName,
         poNumber: form.poNumber,
@@ -410,7 +641,8 @@ export default function CreateEnquiryModal({
   };
 
   const tabs = [
-    { key: "bo", label: "BO / Enquiry & Part Mapping", Icon: IconBO },
+    { key: "bo", label: "BO / Enquiry Details", Icon: IconBO },
+    { key: "parts", label: `Parts Details${parts.length ? ` (${parts.length})` : ""}`, Icon: IconPart },
     { key: "po", label: "PO Details", Icon: IconPO },
   ];
 
@@ -778,6 +1010,330 @@ export default function CreateEnquiryModal({
           justify-content: center;
           color: #fff;
         }
+
+        /* ─────────────────────────────────────────────
+           Parts Details tab
+        ───────────────────────────────────────────── */
+        .parts-title-row {
+          justify-content: space-between;
+          width: 100%;
+        }
+        .add-part-btn {
+          margin-left: auto;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 14px;
+          border: none;
+          border-radius: 8px;
+          background: linear-gradient(135deg, #7c3aed, #a855f7);
+          color: #fff;
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.12s;
+          box-shadow: 0 2px 8px rgba(124,58,237,0.25);
+          position: relative;
+          z-index: 1;
+        }
+        .add-part-btn:hover { opacity: 0.92; transform: translateY(-1px); }
+        .add-part-btn-bottom {
+          margin: 16px 0 0;
+          width: 100%;
+          justify-content: center;
+          padding: 11px 14px;
+          font-size: 13px;
+        }
+
+        .parts-error-banner {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #fef2f2;
+          border: 1.5px solid #fecaca;
+          color: #b91c1c;
+          font-size: 12.5px;
+          font-weight: 600;
+          border-radius: 8px;
+          padding: 10px 14px;
+          margin-bottom: 14px;
+          position: relative;
+          z-index: 1;
+        }
+
+        .parts-empty-state {
+          background: rgba(255,255,255,0.7);
+          border: 1.5px dashed #c4b5fd;
+          border-radius: 10px;
+          padding: 24px;
+          text-align: center;
+          color: #6b7280;
+          font-size: 13.5px;
+          position: relative;
+          z-index: 1;
+        }
+
+        .parts-list {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          position: relative;
+          z-index: 1;
+        }
+
+        /* Parent part card */
+        .part-card {
+          background: #fff;
+          border: 1.5px solid #ddd6fe;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 1px 4px rgba(124,58,237,0.06);
+        }
+        .part-card-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 14px;
+          background: linear-gradient(135deg, #f5f3ff, #f3e8ff);
+          border-bottom: 1px solid #ede9fe;
+        }
+        .part-collapse-btn {
+          border: none;
+          background: #fff;
+          width: 26px;
+          height: 26px;
+          border-radius: 7px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          color: #7c3aed;
+          flex-shrink: 0;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .part-collapse-btn .chevron {
+          display: flex;
+          transition: transform 0.18s;
+          transform: rotate(0deg);
+        }
+        .part-collapse-btn .chevron.open {
+          transform: rotate(90deg);
+        }
+
+        .part-badge {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 11.5px;
+          font-weight: 700;
+          padding: 4px 10px;
+          border-radius: 999px;
+          flex-shrink: 0;
+        }
+        .parent-badge {
+          background: #7c3aed;
+          color: #fff;
+        }
+        .child-badge {
+          background: #c4b5fd;
+          color: #3b0764;
+        }
+
+        .part-card-summary {
+          font-size: 13px;
+          font-weight: 700;
+          color: #4c1d95;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .child-count-chip {
+          font-size: 11px;
+          font-weight: 600;
+          color: #7c3aed;
+          background: #fff;
+          border: 1px solid #ddd6fe;
+          padding: 3px 9px;
+          border-radius: 999px;
+          flex-shrink: 0;
+        }
+
+        .part-card-header .remove-part-btn {
+          margin-left: auto;
+        }
+
+        .remove-part-btn, .remove-child-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          border: 1.5px solid #fecaca;
+          background: #fff;
+          color: #dc2626;
+          font-size: 11.5px;
+          font-weight: 700;
+          padding: 6px 10px;
+          border-radius: 7px;
+          cursor: pointer;
+          transition: all 0.15s;
+          flex-shrink: 0;
+          white-space: nowrap;
+        }
+        .remove-part-btn:hover, .remove-child-btn:hover {
+          background: #fef2f2;
+          border-color: #fca5a5;
+        }
+
+        .part-card-body {
+          padding: 16px;
+        }
+
+        /* Child parts nested tree */
+        .child-parts-wrap {
+          margin-top: 6px;
+          padding-left: 22px;
+          border-left: 2px dashed #ddd6fe;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .child-part-row {
+          display: flex;
+          gap: 8px;
+          position: relative;
+        }
+        .child-part-connector {
+          width: 18px;
+          height: 22px;
+          margin-left: -22px;
+          border-bottom: 2px dashed #ddd6fe;
+          border-left: 2px dashed transparent;
+          flex-shrink: 0;
+        }
+        .child-part-content {
+          flex: 1;
+          background: #faf9ff;
+          border: 1.5px solid #ede9fe;
+          border-radius: 10px;
+          padding: 12px;
+        }
+        .child-part-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .child-part-header .remove-child-btn {
+          margin-left: auto;
+        }
+        .child-fields-grid {
+          margin-bottom: 10px;
+        }
+        .child-fields-grid .tab-field-card {
+          background: #fff;
+        }
+
+        .add-child-part-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 9px 14px;
+          border: 1.5px dashed #a78bfa;
+          border-radius: 8px;
+          background: #fff;
+          color: #7c3aed;
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.15s;
+          width: fit-content;
+        }
+        .add-child-part-btn:hover {
+          background: #f5f3ff;
+          border-color: #7c3aed;
+        }
+
+        /* Child Part Yes/No confirmation prompt */
+        .child-confirm-box {
+          margin-top: 6px;
+          padding: 12px 14px;
+          background: #faf9ff;
+          border: 1.5px dashed #ddd6fe;
+          border-radius: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .child-confirm-text {
+          font-size: 12.5px;
+          font-weight: 600;
+          color: #4c1d95;
+        }
+        .child-confirm-actions {
+          display: flex;
+          gap: 8px;
+        }
+        .child-confirm-yes-btn,
+        .child-confirm-no-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 16px;
+          border-radius: 7px;
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .child-confirm-yes-btn {
+          border: none;
+          background: linear-gradient(135deg, #7c3aed, #a855f7);
+          color: #fff;
+          box-shadow: 0 2px 8px rgba(124,58,237,0.25);
+        }
+        .child-confirm-yes-btn:hover { opacity: 0.92; }
+        .child-confirm-no-btn {
+          border: 1.5px solid #e5e7eb;
+          background: #fff;
+          color: #374151;
+        }
+        .child-confirm-no-btn:hover { background: #f9fafb; border-color: #d1d5db; }
+
+        /* Shown after the user answers "No" — lets them change their mind */
+        .child-decision-skipped {
+          margin-top: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 9px 14px;
+          background: #f9fafb;
+          border: 1px dashed #e5e7eb;
+          border-radius: 8px;
+          font-size: 12px;
+          color: #6b7280;
+        }
+        .child-decision-change-btn {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          border: none;
+          background: none;
+          color: #7c3aed;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          padding: 0;
+          flex-shrink: 0;
+          white-space: nowrap;
+        }
+        .child-decision-change-btn:hover { text-decoration: underline; }
+
+        @media (max-width: 640px) {
+          .part-card-header { flex-wrap: wrap; }
+          .child-parts-wrap { padding-left: 12px; }
+        }
       `}</style>
 
       <div className="modal-overlay" onClick={onClose}>
@@ -869,60 +1425,257 @@ export default function CreateEnquiryModal({
                     </div>
                   )}
                 </div>
-
-                <div className="tab-section part-section" style={{ marginTop: "16px" }}>
-                  <div className="tab-section-blob part-blob" />
-                  <div className="tab-section-title">
-                    <span className="section-icon part"><IconPart /></span>
-                    Part Number Mapping
-                  </div>
-                  <div className="tab-fields-grid">
-                    <div className="tab-field-card">
-                      <label className="part-label">Customer Part No</label>
-                      <input type="text" placeholder="Enter customer part no" value={form.customerPartNo} onChange={(e) => handleChange("customerPartNo", e.target.value)} />
-                    </div>
-                    <div className="tab-field-card">
-                      <label className="part-label">Customer Part Name</label>
-                      <input type="text" placeholder="Enter customer part name" value={form.customerPartName} onChange={(e) => handleChange("customerPartName", e.target.value)} />
-                    </div>
-                  </div>
-
-                  {/* ── MODIFIED BO PART NO — Smart Builder Field ── */}
-                  <div className="tab-fields-grid">
-                    <div className="tab-field-card">
-                      <label className="part-label">Modified BO Part No</label>
-                      <div className="bo-field-trigger-wrap">
-                        {form.modifiedBOPartNo ? (
-                          /* Value already set — show it with a clear button */
-                          <div className="bo-filled-display">
-                            <span>{form.modifiedBOPartNo}</span>
-                            <button
-                              className="bo-filled-clear"
-                              title="Clear and rebuild"
-                              onClick={() => handleChange("modifiedBOPartNo", "")}
-                            >
-                              <IconClose />
-                            </button>
-                          </div>
-                        ) : null}
-                        {/* Always show the builder button */}
-                        <button
-                          type="button"
-                          className="bo-generate-btn"
-                          onClick={() => setShowBOPanel(true)}
-                        >
-                          <span className="bo-generate-btn-icon"><IconWand /></span>
-                          {form.modifiedBOPartNo ? "Rebuild BO Part Number" : "Generate BO Part Number"}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="tab-field-card">
-                      <label className="part-label">BO Part Name</label>
-                      <input type="text" placeholder="Enter BO part name" value={form.boPartName} onChange={(e) => handleChange("boPartName", e.target.value)} />
-                    </div>
-                  </div>
-                </div>
               </>
+            )}
+
+            {/* ─── Parts Details (multiple parent + child parts) ─── */}
+            {activeTab === "parts" && (
+              <div className="tab-section part-section">
+                <div className="tab-section-blob part-blob" />
+                <div className="tab-section-title parts-title-row">
+                  <span className="section-icon part"><IconPart /></span>
+                  Parts Details
+                  <button
+                    type="button"
+                    className="add-part-btn"
+                    onClick={addPart}
+                  >
+                    <IconPlus /> Add Parent Part
+                  </button>
+                </div>
+
+                {partsError && (
+                  <div className="parts-error-banner">
+                    <IconAlert /> {partsError}
+                  </div>
+                )}
+
+                {parts.length === 0 ? (
+                  <div className="parts-empty-state">
+                    No parts added yet. A default part will be created automatically — use “Add Child Part” within it to add child parts.
+                  </div>
+                ) : (
+                  <div className="parts-list">
+                    {parts.map((part, pIdx) => (
+                      <div className="part-card" key={part.id}>
+                        <div className="part-card-header">
+                          <button
+                            type="button"
+                            className="part-collapse-btn"
+                            onClick={() => togglePartCollapse(part.id)}
+                            title={part.collapsed ? "Expand" : "Collapse"}
+                          >
+                            <span className={`chevron${part.collapsed ? "" : " open"}`}><IconChevron /></span>
+                          </button>
+                          <span className="part-badge parent-badge"><IconParentTag /> Parent Part {pIdx + 1}</span>
+                          {part.customerPartNo && <span className="part-card-summary">{part.customerPartNo}</span>}
+                          {part.children.length > 0 && (
+                            <span className="child-count-chip">{part.children.length} child part{part.children.length > 1 ? "s" : ""}</span>
+                          )}
+                          <button
+                            type="button"
+                            className="remove-part-btn"
+                            title="Remove Part"
+                            onClick={() => removePart(part.id)}
+                          >
+                            <IconTrash /> Remove Part
+                          </button>
+                        </div>
+
+                        {!part.collapsed && (
+                          <div className="part-card-body">
+                            <div className="tab-fields-grid">
+                              <div className="tab-field-card">
+                                <label className="part-label required">Customer Part No</label>
+                                <input
+                                  type="text"
+                                  placeholder="Enter customer part no"
+                                  value={part.customerPartNo}
+                                  onChange={(e) => updatePartField(part.id, "customerPartNo", e.target.value)}
+                                />
+                              </div>
+                              <div className="tab-field-card">
+                                <label className="part-label">Customer Part Name</label>
+                                <input
+                                  type="text"
+                                  placeholder="Enter customer part name"
+                                  value={part.customerPartName}
+                                  onChange={(e) => updatePartField(part.id, "customerPartName", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            <div className="tab-fields-grid">
+                              <div className="tab-field-card">
+                                <label className="part-label">Modified BO Part No</label>
+                                <div className="bo-field-trigger-wrap">
+                                  {part.modifiedBOPartNo ? (
+                                    <div className="bo-filled-display">
+                                      <span>{part.modifiedBOPartNo}</span>
+                                      <button
+                                        className="bo-filled-clear"
+                                        title="Clear and rebuild"
+                                        onClick={() => updatePartField(part.id, "modifiedBOPartNo", "")}
+                                      >
+                                        <IconClose />
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className="bo-generate-btn"
+                                    onClick={() => openBOBuilder(part.id)}
+                                  >
+                                    <span className="bo-generate-btn-icon"><IconWand /></span>
+                                    {part.modifiedBOPartNo ? "Rebuild BO Part Number" : "Generate BO Part Number"}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="tab-field-card">
+                                <label className="part-label">BO Part Name</label>
+                                <input
+                                  type="text"
+                                  placeholder="Enter BO part name"
+                                  value={part.boPartName}
+                                  onChange={(e) => updatePartField(part.id, "boPartName", e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            {/* ── Child Parts — gated behind a Yes/No confirmation ── */}
+                            {part.children.length > 0 || part.childDecision === "yes" ? (
+                            <div className="child-parts-wrap">
+                              {part.children.map((child, cIdx) => (
+                                <div className="child-part-row" key={child.id}>
+                                  <div className="child-part-connector" />
+                                  <div className="child-part-content">
+                                    <div className="child-part-header">
+                                      <span className="part-badge child-badge"><IconChildTag /> Child Part {cIdx + 1}</span>
+                                      <button
+                                        type="button"
+                                        className="remove-child-btn"
+                                        title="Remove Child Part"
+                                        onClick={() => removeChildPart(part.id, child.id)}
+                                      >
+                                        <IconTrash /> Remove
+                                      </button>
+                                    </div>
+                                    <div className="tab-fields-grid child-fields-grid">
+                                      <div className="tab-field-card">
+                                        <label className="part-label required">Customer Part No</label>
+                                        <input
+                                          type="text"
+                                          placeholder="Enter customer part no"
+                                          value={child.customerPartNo}
+                                          onChange={(e) => updateChildField(part.id, child.id, "customerPartNo", e.target.value)}
+                                        />
+                                      </div>
+                                      <div className="tab-field-card">
+                                        <label className="part-label">Customer Part Name</label>
+                                        <input
+                                          type="text"
+                                          placeholder="Enter customer part name"
+                                          value={child.customerPartName}
+                                          onChange={(e) => updateChildField(part.id, child.id, "customerPartName", e.target.value)}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="tab-fields-grid child-fields-grid">
+                                      <div className="tab-field-card">
+                                        <label className="part-label">Modified BO Part No</label>
+                                        <div className="bo-field-trigger-wrap">
+                                          {child.modifiedBOPartNo ? (
+                                            <div className="bo-filled-display">
+                                              <span>{child.modifiedBOPartNo}</span>
+                                              <button
+                                                className="bo-filled-clear"
+                                                title="Clear and rebuild"
+                                                onClick={() => updateChildField(part.id, child.id, "modifiedBOPartNo", "")}
+                                              >
+                                                <IconClose />
+                                              </button>
+                                            </div>
+                                          ) : null}
+                                          <button
+                                            type="button"
+                                            className="bo-generate-btn"
+                                            onClick={() => openBOBuilder(part.id, child.id)}
+                                          >
+                                            <span className="bo-generate-btn-icon"><IconWand /></span>
+                                            {child.modifiedBOPartNo ? "Rebuild BO Part Number" : "Generate BO Part Number"}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="tab-field-card">
+                                        <label className="part-label">BO Part Name</label>
+                                        <input
+                                          type="text"
+                                          placeholder="Enter BO part name"
+                                          value={child.boPartName}
+                                          onChange={(e) => updateChildField(part.id, child.id, "boPartName", e.target.value)}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+
+                              <button
+                                type="button"
+                                className="add-child-part-btn"
+                                onClick={() => addChildPart(part.id)}
+                              >
+                                <IconPlus /> Add Child Part
+                              </button>
+                            </div>
+                            ) : part.childDecision === "no" ? (
+                              <div className="child-decision-skipped">
+                                <span>Child Parts skipped for this Parent Part.</span>
+                                <button
+                                  type="button"
+                                  className="child-decision-change-btn"
+                                  onClick={() => setChildDecision(part.id, "yes")}
+                                >
+                                  <IconPlus /> Add Child Part
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="child-confirm-box">
+                                <div className="child-confirm-text">
+                                  Do you want to add Child Part(s) for this Parent Part?
+                                </div>
+                                <div className="child-confirm-actions">
+                                  <button
+                                    type="button"
+                                    className="child-confirm-yes-btn"
+                                    onClick={() => setChildDecision(part.id, "yes")}
+                                  >
+                                    <IconCheck /> Yes
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="child-confirm-no-btn"
+                                    onClick={() => setChildDecision(part.id, "no")}
+                                  >
+                                    <IconClose /> No
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="add-part-btn add-part-btn-bottom"
+                  onClick={addPart}
+                >
+                  <IconPlus /> Add Parent Part
+                </button>
+              </div>
             )}
 
             {/* ─── PO Details ─── */}
@@ -967,10 +1720,10 @@ export default function CreateEnquiryModal({
       <BOBuilderDrawer
         isOpen={showBOPanel}
         onClose={() => setShowBOPanel(false)}
-        onApply={(value) => handleChange("modifiedBOPartNo", value)}
+        onApply={(value) => applyBOPartNo(value)}
         formData={{
           customerName:   form.customerName,
-          customerPartNo: form.customerPartNo,
+          customerPartNo: getBoTargetCustomerPartNo(),
         }}
       />
     </>

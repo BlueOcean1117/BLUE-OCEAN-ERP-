@@ -41,11 +41,19 @@ const EnquirySchema = new mongoose.Schema(
     },
 
     // ── ADDED: multiple suppliers assigned per Part, matched by Customer Part No ──
+    // CHANGE: `suppliers` was `[{ type: String }]` — now each supplier is an object
+    // so it can carry its own PO Number alongside its name.
     partSuppliers: [
       {
         _id: false,
         customerPartNo: { type: String, default: "" },
-        suppliers: [{ type: String }],
+        suppliers: [
+          {
+            _id: false,
+            name: { type: String, default: "" },     // CHANGE: was a plain string entry
+            poNumber: { type: String, default: "" },  // ADDED: PO Number per supplier
+          },
+        ],
       },
     ],
 

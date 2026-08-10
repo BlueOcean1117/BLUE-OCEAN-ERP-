@@ -24,6 +24,23 @@ async function generateEnquiryNumber() {
   return `${prefix}${String(nextNum).padStart(3, "0")}`;
 }
 
+// Normalize the poDetails block coming from the client so a bad/empty date
+// string never silently fails to cast and drops the whole sub-object.
+function normalizePoDetails(pd) {
+  if (!pd || typeof pd !== "object") return { supplierName: "", poNumber: "", dateOfIssue: null };
+  const rawDate = pd.dateOfIssue;
+  let dateOfIssue = null;
+  if (rawDate) {
+    const d = new Date(rawDate);
+    dateOfIssue = isNaN(d) ? null : d;
+  }
+  return {
+    supplierName: pd.supplierName || "",
+    poNumber: pd.poNumber || "",
+    dateOfIssue,
+  };
+}
+
 // POST /api/v1/enquiry/create
 exports.createEnquiry = async (req, res) => {
   try {
@@ -35,6 +52,10 @@ exports.createEnquiry = async (req, res) => {
 
     data.generatedBy = req.user?.name || data.generatedBy || "System";
 
+    // Explicitly normalize PO Details before saving — guarantees this
+    // sub-object is always written even if a field came through empty/odd.
+    data.poDetails = normalizePoDetails(data.poDetails);
+
     data.editHistory = [{
       section: "BO / Enquiry Details",
       sectionColor: "bo",
@@ -43,7 +64,14 @@ exports.createEnquiry = async (req, res) => {
       timestamp: new Date(),
     }];
 
-    const enquiry = await Enquiry.create(data);
+    console.log("[createEnquiry] Incoming poDetails:", req.body.poDetails);
+    console.log("[createEnquiry] Normalized poDetails to save:", data.poDetails);
+
+    const enquiryDoc = new Enquiry(data);
+    const enquiry = await enquiryDoc.save();
+
+    console.log("[createEnquiry] Saved enquiry poDetails:", enquiry.poDetails);
+
     res.status(201).json(enquiry);
   } catch (err) {
     console.error("Create enquiry error:", err);
@@ -341,11 +369,31 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     const { enquiryNumber, ...setData } = data; // never overwrite enquiryNumber via $set
-    const updated = await Enquiry.findByIdAndUpdate(
-      req.params.id,
-      { $set: setData, $push: { editHistory: { $each: newEntries } } },
-      { new: true }
-    );
+
+    // Explicitly normalize PO Details before saving — guarantees this
+    // sub-object is always written even if a field came through empty/odd,
+    // instead of relying on the generic $set to cast it correctly.
+    if (Object.prototype.hasOwnProperty.call(setData, "poDetails")) {
+      setData.poDetails = normalizePoDetails(setData.poDetails);
+    }
+
+    console.log("[updateEnquiry] Incoming poDetails:", req.body.poDetails);
+    console.log("[updateEnquiry] Normalized poDetails to save:", setData.poDetails);
+
+    // Load as a live document (not .lean()) so we can use markModified —
+    // this removes any possibility of a nested-object $set being skipped.
+    const doc = await Enquiry.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Enquiry not found" });
+
+    Object.assign(doc, setData);
+    doc.markModified("poDetails");
+    doc.markModified("partSuppliers");
+    doc.editHistory.push(...newEntries);
+
+    const updated = await doc.save();
+
+    console.log("[updateEnquiry] Saved enquiry poDetails:", updated.poDetails);
+
     res.json(updated);
   } catch (err) {
     console.error("Update enquiry error:", err);

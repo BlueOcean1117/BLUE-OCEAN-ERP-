@@ -97,6 +97,20 @@ export default function ViewEnquiryModal({ isOpen, onClose, enquiry }) {
   const hasMultiParts = Array.isArray(enquiry.parts) && enquiry.parts.length > 0;
   const hasMultiPO = Array.isArray(enquiry.poDetailsList) && enquiry.poDetailsList.length > 0;
 
+  // Suppliers assigned per-part ("Assign Suppliers to Parts"), normalized the
+  // same way the table does — handles legacy string[] suppliers too.
+  const partSuppliersList = (Array.isArray(enquiry.partSuppliers) ? enquiry.partSuppliers : [])
+    .map((ps) => ({
+      customerPartNo: ps.customerPartNo || "",
+      suppliers: (Array.isArray(ps.suppliers) ? ps.suppliers : []).map((s) =>
+        typeof s === "string"
+          ? { name: s, poNumber: "", dateOfIssue: "" }
+          : { name: s.name || "", poNumber: s.poNumber || "", dateOfIssue: s.dateOfIssue || "" }
+      ),
+    }))
+    .filter((ps) => ps.suppliers.length > 0);
+  const hasPartSuppliers = partSuppliersList.length > 0;
+
   const stored = (enquiry.editHistory || []).map((item) => ({
     section: item.section,
     sectionColor: item.sectionColor || "bo",
@@ -330,6 +344,42 @@ export default function ViewEnquiryModal({ isOpen, onClose, enquiry }) {
                         <span>{po.linkedPartNo || "Whole enquiry"}</span>
                       </div>
                     </div>
+                  </div>
+                ))}
+              </div>
+            ) : hasPartSuppliers ? (
+              // ── Suppliers assigned per Part (the "Assign Suppliers to Parts" section) ──
+              <div className="parts-hierarchy">
+                {partSuppliersList.map((ps, pIdx) => (
+                  <div className="parts-h-parent" key={pIdx}>
+                    <div className="parts-h-parent-header">
+                      <span className="parts-h-badge parent"><IconParentTag /> Part</span>
+                      {ps.customerPartNo && <span className="parts-h-name">{ps.customerPartNo}</span>}
+                    </div>
+                    {ps.suppliers.map((s, sIdx) => (
+                      <div key={sIdx} style={{ marginTop: sIdx > 0 ? 10 : 0 }}>
+                        <div className="view-fields-grid">
+                          <div className="view-field-card">
+                            <label>SUPPLIER NAME</label>
+                            <span>{s.name || "—"}</span>
+                          </div>
+                          <div className="view-field-card">
+                            <label>PO NUMBER</label>
+                            <span>
+                              {s.poNumber
+                                ? <span className="view-badge green">{s.poNumber}</span>
+                                : "—"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="view-fields-grid">
+                          <div className="view-field-card">
+                            <label>DATE OF ISSUE</label>
+                            <span className="view-date-val"><IconCal /> {formatDateShort(s.dateOfIssue)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>

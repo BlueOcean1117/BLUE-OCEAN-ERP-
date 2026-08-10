@@ -80,6 +80,13 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
   // per row (per part) instead of one merged cell for the whole enquiry — a part
   // can now have multiple suppliers, so a single shared cell can't represent that.
   const hasPartSuppliers = rows.some((r) => (r.suppliers || []).length > 0);
+  // The top-level "PO Details" tab (Supplier Name / PO Number / Date of Issue)
+  // is saved separately from per-part supplier assignments. Previously, once
+  // ANY part had a supplier assigned, this general PO entry was silently
+  // dropped from the table (even though it was saved correctly in the DB).
+  // Carry it forward here so it still shows up, on the first row, alongside
+  // the per-part suppliers instead of disappearing.
+  const hasGeneralPO = !!(enq.poDetails?.supplierName || enq.poDetails?.poNumber || enq.poDetails?.dateOfIssue);
 
   return rows.map((row, rIdx) => {
     const isFirst = rIdx === 0;
@@ -142,8 +149,13 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
             with no partSuppliers data keep the old single merged cell. */}
         {hasPartSuppliers ? (
           <td className="enq-td">
-            {row.suppliers && row.suppliers.length > 0 ? (
+            {(row.suppliers && row.suppliers.length > 0) || (isFirst && hasGeneralPO) ? (
               <div className="supplier-cell-list">
+                {isFirst && hasGeneralPO && (
+                  <span className="cell-supplier-link" title="General PO Details">
+                    {enq.poDetails?.supplierName || "—"}
+                  </span>
+                )}
                 {row.suppliers.map((s, i) => (
                   <span className="cell-supplier-link" key={i}>{s.name}</span>
                 ))}
@@ -165,8 +177,13 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
         {/* ── PO NUMBER ── same per-row logic as Supplier, paired 1:1 with each supplier above ── */}
         {hasPartSuppliers ? (
           <td className="enq-td">
-            {row.suppliers && row.suppliers.length > 0 ? (
+            {(row.suppliers && row.suppliers.length > 0) || (isFirst && hasGeneralPO) ? (
               <div className="supplier-cell-list">
+                {isFirst && hasGeneralPO && (
+                  enq.poDetails?.poNumber
+                    ? <span className="cell-po">{enq.poDetails.poNumber}</span>
+                    : <span className="enq-empty">—</span>
+                )}
                 {row.suppliers.map((s, i) => (
                   <span key={i}>{s.poNumber ? <span className="cell-po">{s.poNumber}</span> : <span className="enq-empty">—</span>}</span>
                 ))}
@@ -192,8 +209,13 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
             partSuppliers data keep the old single merged cell (poDetails.dateOfIssue). */}
         {hasPartSuppliers ? (
           <td className="enq-td">
-            {row.suppliers && row.suppliers.length > 0 ? (
+            {(row.suppliers && row.suppliers.length > 0) || (isFirst && hasGeneralPO) ? (
               <div className="supplier-cell-list">
+                {isFirst && hasGeneralPO && (
+                  enq.poDetails?.dateOfIssue
+                    ? <span className="cell-po">{formatDate(enq.poDetails.dateOfIssue)}</span>
+                    : <span className="enq-empty">—</span>
+                )}
                 {row.suppliers.map((s, i) => (
                   <span key={i}>{s.dateOfIssue ? <span className="cell-po">{formatDate(s.dateOfIssue)}</span> : <span className="enq-empty">—</span>}</span>
                 ))}

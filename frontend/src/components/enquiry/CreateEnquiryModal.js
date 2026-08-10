@@ -1928,23 +1928,6 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
-                <div className="tab-fields-grid">
-                  <div className="tab-field-card">
-                    <label className="po-label">Supplier Name</label>
-                    <input type="text" placeholder="Enter supplier name" value={form.supplierName} onChange={(e) => handleChange("supplierName", e.target.value)} />
-                  </div>
-                  <div className="tab-field-card">
-                    <label className="po-label">PO Number</label>
-                    <input type="text" placeholder="Enter PO number" value={form.poNumber} onChange={(e) => handleChange("poNumber", e.target.value)} />
-                  </div>
-                </div>
-                <div className="tab-fields-grid single">
-                  <div className="tab-field-card" style={{ maxWidth: "280px" }}>
-                    <label className="po-label">Date of Issue</label>
-                    <input type="date" value={form.dateOfIssue} onChange={(e) => handleChange("dateOfIssue", e.target.value)} />
-                  </div>
-                </div>
-
                 {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number and Date of Issue ── */}
                 <div className="supplier-assign-section">
                   <div className="supplier-assign-title">

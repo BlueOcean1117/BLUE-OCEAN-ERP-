@@ -548,14 +548,23 @@ export default function CreateEnquiryModal({
   /* ── Supplier assignment — a Part can have multiple suppliers, each with its own PO Number and Date of Issue (PO Details tab) ── */
   const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue) => {
     const value = (rawValue || "").trim();
-    if (!value) return;
+    if (!value) {
+      console.log("[addSupplierToPart] BLOCKED — name was empty for partId:", partId);
+      return;
+    }
     const poNumber = (rawPoNumber || "").trim();
     const dateOfIssue = (rawDateOfIssue || "").trim();
+    console.log("[addSupplierToPart] called with:", { partId, value, poNumber, dateOfIssue });
     setPartSuppliers((prev) => {
       const current = prev[partId] || [];
       // avoid case-insensitive duplicates on supplier name
-      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) return prev;
-      return { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
+      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) {
+        console.log("[addSupplierToPart] SKIPPED — duplicate name already in list for partId:", partId);
+        return prev;
+      }
+      const next = { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
+      console.log("[addSupplierToPart] new partSuppliers state:", JSON.stringify(next));
+      return next;
     });
     setSupplierDraft((prev) => ({ ...prev, [partId]: "" }));
     setSupplierPoDraft((prev) => ({ ...prev, [partId]: "" }));
@@ -708,6 +717,7 @@ export default function CreateEnquiryModal({
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
+    console.log("[handleSubmit] FINAL payload.partSuppliers being sent:", JSON.stringify(payload.partSuppliers, null, 2));
     onSubmit(payload);
   };
 

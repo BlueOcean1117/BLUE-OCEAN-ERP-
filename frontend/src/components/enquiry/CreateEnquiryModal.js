@@ -708,6 +708,12 @@ export default function CreateEnquiryModal({
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
+
+    // Diagnostic only — does not affect save behaviour. Open your browser's
+    // DevTools Console (F12) and click Create/Update Enquiry: this shows the
+    // exact partSuppliers data about to be sent to the server.
+    console.log("[CreateEnquiryModal] payload.partSuppliers:", JSON.stringify(payload.partSuppliers, null, 2));
+
     onSubmit(payload);
   };
 

@@ -1928,6 +1928,45 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
+
+                {/* ── General PO Details (Supplier Name / PO Number / Date of Issue) ──
+                    These feed the top-level `poDetails` object that the Enquiry Table,
+                    View modal, and Dashboard exports read from (enq.poDetails.*).
+                    Previously this tab only had the per-part "Assign Suppliers" section
+                    below, so these three fields were never rendered/editable and were
+                    always submitted as empty — which is why Supplier Name, PO Number
+                    and Date of Issue looked like they "weren't saving". */}
+                <div className="tab-fields-grid">
+                  <div className="tab-field-card">
+                    <label className="bo-label">Supplier Name</label>
+                    <input
+                      type="text"
+                      placeholder="Enter supplier name"
+                      value={form.supplierName}
+                      onChange={(e) => handleChange("supplierName", e.target.value)}
+                    />
+                  </div>
+                  <div className="tab-field-card">
+                    <label className="bo-label">PO Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter PO number"
+                      value={form.poNumber}
+                      onChange={(e) => handleChange("poNumber", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="tab-fields-grid single">
+                  <div className="tab-field-card">
+                    <label className="bo-label">Date of Issue</label>
+                    <input
+                      type="date"
+                      value={form.dateOfIssue}
+                      onChange={(e) => handleChange("dateOfIssue", e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number and Date of Issue ── */}
                 <div className="supplier-assign-section">
                   <div className="supplier-assign-title">

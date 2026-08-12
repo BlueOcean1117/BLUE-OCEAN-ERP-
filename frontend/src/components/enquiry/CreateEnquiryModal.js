@@ -568,17 +568,6 @@ export default function CreateEnquiryModal({
       [partId]: (prev[partId] || []).filter((s) => s.name !== supplierName),
     }));
 
-  // Commits whatever is currently typed (but not yet added via the button/Enter)
-  // straight into partSuppliers state. Called on blur of the supplier row so a
-  // supplier is never lost just because the user clicked away instead of
-  // pressing "Add Supplier" — state is the single source of truth from this
-  // point on, instead of relying only on the submit-time safety net below.
-  const commitSupplierDraft = (partId) => {
-    const draftName = (supplierDraft[partId] || "").trim();
-    if (!draftName) return;
-    addSupplierToPart(partId, draftName, supplierPoDraft[partId], supplierDateDraft[partId]);
-  };
-
   // Click a chip to load it back into the input row for editing (name, PO, date)
   const editSupplierChip = (partId, supplier) => {
     setSupplierDraft((prev) => ({ ...prev, [partId]: supplier.name }));
@@ -720,12 +709,14 @@ export default function CreateEnquiryModal({
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
 
-    // Mirrors the backend's "[createEnquiry] Incoming partSuppliers" log —
-    // check this in the browser console FIRST when debugging a save issue.
-    // If this is already empty here, the bug is in the UI (a chip wasn't
-    // added to partSuppliers state). If this has data but the backend log
-    // shows empty, the request itself is being altered/stale on the way out.
-    console.log("[CreateEnquiryModal] Submitting partSuppliers:", JSON.stringify(payload.partSuppliers));
+    // TEMPORARY DEBUG LOG — open the browser console (F12 → Console tab) right
+    // before clicking Create/Update Enquiry, then check this line. It shows
+    // exactly what is about to be sent to the server. If a supplier you typed
+    // (e.g. "Valveworks") is missing here, the problem is in this component
+    // (state not being captured). If it IS here, the problem is downstream —
+    // either the network request or how the table renders it — and we should
+    // check the Network tab / server logs next instead.
+    console.log("[CreateEnquiryModal] submitting payload.partSuppliers:", JSON.stringify(payload.partSuppliers, null, 2));
 
     onSubmit(payload);
   };
@@ -1473,6 +1464,32 @@ export default function CreateEnquiryModal({
           font-weight: 700;
           color: #15803d;
         }
+        .supplier-count-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10.5px;
+          font-weight: 700;
+          color: #15803d;
+          background: #dcfce7;
+          border: 1px solid #86efac;
+          border-radius: 999px;
+          padding: 2px 8px 2px 6px;
+          margin-left: auto;
+        }
+        .supplier-count-badge svg {
+          width: 10px;
+          height: 10px;
+        }
+        .supplier-pending-hint {
+          margin-top: 7px;
+          font-size: 11px;
+          color: #92400e;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 7px;
+          padding: 6px 9px;
+        }
         .supplier-chip-list {
           display: flex;
           flex-wrap: wrap;
@@ -1592,6 +1609,13 @@ export default function CreateEnquiryModal({
           box-shadow: 0 2px 8px rgba(16,185,129,0.25);
         }
         .supplier-add-btn:hover { opacity: 0.92; transform: translateY(-1px); }
+        .supplier-add-btn:disabled {
+          background: #d1d5db;
+          box-shadow: none;
+          cursor: not-allowed;
+          opacity: 0.7;
+        }
+        .supplier-add-btn:disabled:hover { transform: none; opacity: 0.7; }
       `}</style>
 
       <div className="modal-overlay" onClick={onClose}>
@@ -1947,6 +1971,45 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
+
+                {/* ── General PO Details (Supplier Name / PO Number / Date of Issue) ──
+                    These feed the top-level `poDetails` object that the Enquiry Table,
+                    View modal, and Dashboard exports read from (enq.poDetails.*).
+                    Previously this tab only had the per-part "Assign Suppliers" section
+                    below, so these three fields were never rendered/editable and were
+                    always submitted as empty — which is why Supplier Name, PO Number
+                    and Date of Issue looked like they "weren't saving". */}
+                <div className="tab-fields-grid">
+                  <div className="tab-field-card">
+                    <label className="bo-label">Supplier Name</label>
+                    <input
+                      type="text"
+                      placeholder="Enter supplier name"
+                      value={form.supplierName}
+                      onChange={(e) => handleChange("supplierName", e.target.value)}
+                    />
+                  </div>
+                  <div className="tab-field-card">
+                    <label className="bo-label">PO Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter PO number"
+                      value={form.poNumber}
+                      onChange={(e) => handleChange("poNumber", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="tab-fields-grid single">
+                  <div className="tab-field-card">
+                    <label className="bo-label">Date of Issue</label>
+                    <input
+                      type="date"
+                      value={form.dateOfIssue}
+                      onChange={(e) => handleChange("dateOfIssue", e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number and Date of Issue ── */}
                 <div className="supplier-assign-section">
                   <div className="supplier-assign-title">
@@ -1969,11 +2032,16 @@ export default function CreateEnquiryModal({
                             <div className="supplier-part-label">
                               <span className="part-badge parent-badge"><IconParentTag /> Parent Part {pIdx + 1}</span>
                               {part.customerPartNo && <span className="supplier-part-no">{part.customerPartNo}</span>}
+                              {supList.length > 0 && (
+                                <span className="supplier-count-badge" title="Will be saved with this enquiry">
+                                  <IconCheck /> {supList.length} supplier{supList.length > 1 ? "s" : ""} added
+                                </span>
+                              )}
                             </div>
 
                             <div className="supplier-chip-list">
                               {supList.length === 0 ? (
-                                <span className="supplier-chip-empty">No suppliers assigned yet</span>
+                                <span className="supplier-chip-empty">No suppliers assigned yet — type below and click "+ Add Supplier"</span>
                               ) : (
                                 supList.map((s) => (
                                   <span className="supplier-chip" key={s.name}>
@@ -2000,7 +2068,19 @@ export default function CreateEnquiryModal({
                               )}
                             </div>
 
-                            <div className="supplier-input-row">
+                            <div
+                              className="supplier-input-row"
+                              onBlur={(e) => {
+                                // Auto-save on blur — as soon as focus leaves this whole
+                                // row (e.g. user clicks elsewhere or hits Update Enquiry),
+                                // whatever was typed is committed automatically. No need
+                                // to click "+ Add Supplier" — same effortless behaviour
+                                // as the general Supplier Name / PO Number / Date fields above.
+                                if (!e.currentTarget.contains(e.relatedTarget)) {
+                                  addSupplierToPart(part.id, draft, poDraft, dateDraft);
+                                }
+                              }}
+                            >
                               <input
                                 type="text"
                                 list="existing-suppliers-list"
@@ -2016,7 +2096,6 @@ export default function CreateEnquiryModal({
                                     addSupplierToPart(part.id, draft, poDraft, dateDraft);
                                   }
                                 }}
-                                onBlur={() => commitSupplierDraft(part.id)}
                               />
                               <input
                                 type="text"
@@ -2032,7 +2111,6 @@ export default function CreateEnquiryModal({
                                     addSupplierToPart(part.id, draft, poDraft, dateDraft);
                                   }
                                 }}
-                                onBlur={() => commitSupplierDraft(part.id)}
                               />
                               <input
                                 type="date"
@@ -2047,16 +2125,21 @@ export default function CreateEnquiryModal({
                                     addSupplierToPart(part.id, draft, poDraft, dateDraft);
                                   }
                                 }}
-                                onBlur={() => commitSupplierDraft(part.id)}
                               />
                               <button
                                 type="button"
                                 className="supplier-add-btn"
+                                disabled={!draft.trim()}
                                 onClick={() => addSupplierToPart(part.id, draft, poDraft, dateDraft)}
                               >
                                 <IconPlus /> Add Supplier
                               </button>
                             </div>
+                            {draft.trim() && (
+                              <div className="supplier-pending-hint">
+                                "{draft.trim()}" will be saved automatically — or click <strong>+ Add Supplier</strong> now to attach it right away.
+                              </div>
+                            )}
                           </div>
                         );
                       })}

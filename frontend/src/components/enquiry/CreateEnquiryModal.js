@@ -1454,6 +1454,32 @@ export default function CreateEnquiryModal({
           font-weight: 700;
           color: #15803d;
         }
+        .supplier-count-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10.5px;
+          font-weight: 700;
+          color: #15803d;
+          background: #dcfce7;
+          border: 1px solid #86efac;
+          border-radius: 999px;
+          padding: 2px 8px 2px 6px;
+          margin-left: auto;
+        }
+        .supplier-count-badge svg {
+          width: 10px;
+          height: 10px;
+        }
+        .supplier-pending-hint {
+          margin-top: 7px;
+          font-size: 11px;
+          color: #92400e;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 7px;
+          padding: 6px 9px;
+        }
         .supplier-chip-list {
           display: flex;
           flex-wrap: wrap;
@@ -1573,6 +1599,13 @@ export default function CreateEnquiryModal({
           box-shadow: 0 2px 8px rgba(16,185,129,0.25);
         }
         .supplier-add-btn:hover { opacity: 0.92; transform: translateY(-1px); }
+        .supplier-add-btn:disabled {
+          background: #d1d5db;
+          box-shadow: none;
+          cursor: not-allowed;
+          opacity: 0.7;
+        }
+        .supplier-add-btn:disabled:hover { transform: none; opacity: 0.7; }
       `}</style>
 
       <div className="modal-overlay" onClick={onClose}>
@@ -1989,11 +2022,16 @@ export default function CreateEnquiryModal({
                             <div className="supplier-part-label">
                               <span className="part-badge parent-badge"><IconParentTag /> Parent Part {pIdx + 1}</span>
                               {part.customerPartNo && <span className="supplier-part-no">{part.customerPartNo}</span>}
+                              {supList.length > 0 && (
+                                <span className="supplier-count-badge" title="Will be saved with this enquiry">
+                                  <IconCheck /> {supList.length} supplier{supList.length > 1 ? "s" : ""} added
+                                </span>
+                              )}
                             </div>
 
                             <div className="supplier-chip-list">
                               {supList.length === 0 ? (
-                                <span className="supplier-chip-empty">No suppliers assigned yet</span>
+                                <span className="supplier-chip-empty">No suppliers assigned yet — type below and click "+ Add Supplier"</span>
                               ) : (
                                 supList.map((s) => (
                                   <span className="supplier-chip" key={s.name}>
@@ -2069,11 +2107,17 @@ export default function CreateEnquiryModal({
                               <button
                                 type="button"
                                 className="supplier-add-btn"
+                                disabled={!draft.trim()}
                                 onClick={() => addSupplierToPart(part.id, draft, poDraft, dateDraft)}
                               >
                                 <IconPlus /> Add Supplier
                               </button>
                             </div>
+                            {draft.trim() && (
+                              <div className="supplier-pending-hint">
+                                "{draft.trim()}" isn't added yet — click <strong>+ Add Supplier</strong> (or press Enter) to attach it to this part.
+                              </div>
+                            )}
                           </div>
                         );
                       })}

@@ -708,6 +708,16 @@ export default function CreateEnquiryModal({
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
+
+    // TEMPORARY DEBUG LOG — open the browser console (F12 → Console tab) right
+    // before clicking Create/Update Enquiry, then check this line. It shows
+    // exactly what is about to be sent to the server. If a supplier you typed
+    // (e.g. "Valveworks") is missing here, the problem is in this component
+    // (state not being captured). If it IS here, the problem is downstream —
+    // either the network request or how the table renders it — and we should
+    // check the Network tab / server logs next instead.
+    console.log("[CreateEnquiryModal] submitting payload.partSuppliers:", JSON.stringify(payload.partSuppliers, null, 2));
+
     onSubmit(payload);
   };
 

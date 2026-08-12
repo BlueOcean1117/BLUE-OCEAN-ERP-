@@ -2058,7 +2058,19 @@ export default function CreateEnquiryModal({
                               )}
                             </div>
 
-                            <div className="supplier-input-row">
+                            <div
+                              className="supplier-input-row"
+                              onBlur={(e) => {
+                                // Auto-save on blur — as soon as focus leaves this whole
+                                // row (e.g. user clicks elsewhere or hits Update Enquiry),
+                                // whatever was typed is committed automatically. No need
+                                // to click "+ Add Supplier" — same effortless behaviour
+                                // as the general Supplier Name / PO Number / Date fields above.
+                                if (!e.currentTarget.contains(e.relatedTarget)) {
+                                  addSupplierToPart(part.id, draft, poDraft, dateDraft);
+                                }
+                              }}
+                            >
                               <input
                                 type="text"
                                 list="existing-suppliers-list"
@@ -2115,7 +2127,7 @@ export default function CreateEnquiryModal({
                             </div>
                             {draft.trim() && (
                               <div className="supplier-pending-hint">
-                                "{draft.trim()}" isn't added yet — click <strong>+ Add Supplier</strong> (or press Enter) to attach it to this part.
+                                "{draft.trim()}" will be saved automatically — or click <strong>+ Add Supplier</strong> now to attach it right away.
                               </div>
                             )}
                           </div>

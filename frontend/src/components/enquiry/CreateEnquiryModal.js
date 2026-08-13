@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { toast } from "react-toastify";
 
 const EMPTY_FORM = {
@@ -484,6 +484,19 @@ export default function CreateEnquiryModal({
   const [supplierPoDraft, setSupplierPoDraft] = useState({}); // { [partId]: "PO number being typed" }
   const [supplierDateDraft, setSupplierDateDraft] = useState({}); // { [partId]: "date of issue being typed" }
   const [partSuppliers, setPartSuppliers] = useState({}); // { [partId]: [{ name, poNumber, dateOfIssue }] }
+  const submitLockRef = useRef(false); // synchronous double-submit guard, see handleSubmit
+
+  // Release the lock once the parent reports the request has finished
+  // (success or failure) so a legitimate next save isn't blocked forever.
+  useEffect(() => {
+    if (!isSubmitting) submitLockRef.current = false;
+  }, [isSubmitting]);
+
+  // Also release the lock whenever the modal is (re)opened, in case it was
+  // closed mid-request.
+  useEffect(() => {
+    if (isOpen) submitLockRef.current = false;
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -653,8 +666,17 @@ export default function CreateEnquiryModal({
   };
 
   const handleSubmit = () => {
+    // Instant, synchronous guard against double-submit races (e.g. a fast
+    // double-click, or clicking again while a slow/cold-starting backend
+    // hasn't responded yet). isSubmitting is a prop updated via React state,
+    // which lags one render behind the click — this ref closes that gap
+    // immediately so a second click can never slip a second request through.
+    if (submitLockRef.current || isSubmitting) return;
+    submitLockRef.current = true;
+
     const validationMessage = validateParts();
     if (validationMessage) {
+      submitLockRef.current = false;
       setPartsError(validationMessage);
       setActiveTab("parts");
       return;

@@ -546,25 +546,28 @@ export default function CreateEnquiryModal({
     );
 
   /* ── Supplier assignment — a Part can have multiple suppliers, each with its own PO Number and Date of Issue (PO Details tab) ── */
-  const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue) => {
+  const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue, partLabel) => {
     const value = (rawValue || "").trim();
-    if (!value) {
-      console.log("[addSupplierToPart] BLOCKED — name was empty for partId:", partId);
-      return;
-    }
     const poNumber = (rawPoNumber || "").trim();
     const dateOfIssue = (rawDateOfIssue || "").trim();
-    console.log("[addSupplierToPart] called with:", { partId, value, poNumber, dateOfIssue });
+    if (!value && !poNumber && !dateOfIssue) return; // nothing typed at all — nothing to do
+    // Require all three fields together before a supplier assignment can be added,
+    // per spec: "Do not allow incomplete supplier assignments to be saved."
+    if (!value || !poNumber || !dateOfIssue) {
+      setPartsError(
+        `Please complete Supplier, PO Number and PO Date before adding a supplier${partLabel ? ` for ${partLabel}` : ""}.`
+      );
+      return;
+    }
+    setPartsError("");
     setPartSuppliers((prev) => {
       const current = prev[partId] || [];
       // avoid case-insensitive duplicates on supplier name
       if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) {
-        console.log("[addSupplierToPart] SKIPPED — duplicate name already in list for partId:", partId);
+        setPartsError(`"${value}" is already assigned to this part.`);
         return prev;
       }
-      const next = { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
-      console.log("[addSupplierToPart] new partSuppliers state:", JSON.stringify(next));
-      return next;
+      return { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
     });
     setSupplierDraft((prev) => ({ ...prev, [partId]: "" }));
     setSupplierPoDraft((prev) => ({ ...prev, [partId]: "" }));
@@ -663,18 +666,27 @@ export default function CreateEnquiryModal({
     // (or pressed Enter), that draft text would otherwise be silently lost on save.
     // Auto-commit any non-empty leftover drafts into the supplier list here, per part,
     // right before the payload is built — without mutating existing entries.
+    // Per spec: an incomplete draft (some fields filled, not all) blocks the save
+    // with a clear message, rather than being silently saved partial or dropped.
     const effectivePartSuppliers = { ...partSuppliers };
-    parts.forEach((p) => {
+    for (const p of parts) {
       const draftName = (supplierDraft[p.id] || "").trim();
-      if (!draftName) return; // nothing left in the input for this part — nothing to do
       const draftPo = (supplierPoDraft[p.id] || "").trim();
       const draftDate = (supplierDateDraft[p.id] || "").trim();
+      if (!draftName && !draftPo && !draftDate) continue; // nothing left in the inputs for this part
+      if (!draftName || !draftPo || !draftDate) {
+        setPartsError(
+          `Please complete Supplier, PO Number and PO Date before saving — an incomplete supplier entry is pending for part "${p.customerPartNo || "(unnamed)"}".`
+        );
+        setActiveTab("po");
+        return;
+      }
       const current = effectivePartSuppliers[p.id] || [];
       const alreadyExists = current.some((s) => s.name.toLowerCase() === draftName.toLowerCase());
       if (!alreadyExists) {
         effectivePartSuppliers[p.id] = [...current, { name: draftName, poNumber: draftPo, dateOfIssue: draftDate }];
       }
-    });
+    }
 
     // Clean UI-only fields (id/collapsed) before sending to the API.
     const cleanParts = parts.map(({ id, collapsed, children, childDecision, ...rest }) => ({
@@ -717,7 +729,6 @@ export default function CreateEnquiryModal({
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
-    console.log("[handleSubmit] FINAL payload.partSuppliers being sent:", JSON.stringify(payload.partSuppliers, null, 2));
     onSubmit(payload);
   };
 
@@ -1938,6 +1949,12 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
+
+                {partsError && (
+                  <div className="parts-error-banner">
+                    <IconAlert /> {partsError}
+                  </div>
+                )}
 
                 {/* ── General PO Details (Supplier Name / PO Number / Date of Issue) ──
                     FIX: these three fields feed the top-level `poDetails` object that

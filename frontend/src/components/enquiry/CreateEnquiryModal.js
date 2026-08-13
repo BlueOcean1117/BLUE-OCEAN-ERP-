@@ -664,23 +664,17 @@ export default function CreateEnquiryModal({
 
     // If the user typed a supplier name/PO/Date but never clicked "Add Supplier"
     // (or pressed Enter), that draft text would otherwise be silently lost on save.
-    // Auto-commit any non-empty leftover drafts into the supplier list here, per part,
-    // right before the payload is built — without mutating existing entries.
-    // Per spec: an incomplete draft (some fields filled, not all) blocks the save
-    // with a clear message, rather than being silently saved partial or dropped.
+    // Auto-commit any non-empty, COMPLETE leftover drafts into the supplier list here,
+    // per part, right before the payload is built — without mutating existing entries.
+    // NOTE: an incomplete leftover draft (e.g. only a name typed, no PO/date yet) is
+    // simply left out of the save rather than blocking the whole Create/Update — a
+    // stray or partially-typed value must never prevent saving the rest of the form.
     const effectivePartSuppliers = { ...partSuppliers };
     for (const p of parts) {
       const draftName = (supplierDraft[p.id] || "").trim();
       const draftPo = (supplierPoDraft[p.id] || "").trim();
       const draftDate = (supplierDateDraft[p.id] || "").trim();
-      if (!draftName && !draftPo && !draftDate) continue; // nothing left in the inputs for this part
-      if (!draftName || !draftPo || !draftDate) {
-        setPartsError(
-          `Please complete Supplier, PO Number and PO Date before saving — an incomplete supplier entry is pending for part "${p.customerPartNo || "(unnamed)"}".`
-        );
-        setActiveTab("po");
-        return;
-      }
+      if (!draftName || !draftPo || !draftDate) continue; // incomplete or empty — skip silently, don't block save
       const current = effectivePartSuppliers[p.id] || [];
       const alreadyExists = current.some((s) => s.name.toLowerCase() === draftName.toLowerCase());
       if (!alreadyExists) {

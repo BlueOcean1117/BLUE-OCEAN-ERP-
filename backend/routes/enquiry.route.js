@@ -15,8 +15,8 @@ const router = express.Router();
 router.post("/create", optionalAuth, createEnquiry);
 router.get("/stats", getEnquiryStats);
 router.get("/filters", getFilterOptions);
-router.get("/:id", getEnquiryById);
-router.put("/update/:id", optionalAuth, updateEnquiry);
+router.put("/update/:id", optionalAuth, updateEnquiry);   // only PUT is registered
+router.get("/:id", getEnquiryById);                        // GET only works on /enquiry/:id (no "update")
 router.delete("/delete/:id", deleteEnquiry);
 router.get("/", getAllEnquiries);
 

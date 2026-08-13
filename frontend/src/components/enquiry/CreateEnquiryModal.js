@@ -548,23 +548,14 @@ export default function CreateEnquiryModal({
   /* ── Supplier assignment — a Part can have multiple suppliers, each with its own PO Number and Date of Issue (PO Details tab) ── */
   const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue) => {
     const value = (rawValue || "").trim();
-    if (!value) {
-      console.log("[addSupplierToPart] BLOCKED — name was empty for partId:", partId);
-      return;
-    }
+    if (!value) return;
     const poNumber = (rawPoNumber || "").trim();
     const dateOfIssue = (rawDateOfIssue || "").trim();
-    console.log("[addSupplierToPart] called with:", { partId, value, poNumber, dateOfIssue });
     setPartSuppliers((prev) => {
       const current = prev[partId] || [];
       // avoid case-insensitive duplicates on supplier name
-      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) {
-        console.log("[addSupplierToPart] SKIPPED — duplicate name already in list for partId:", partId);
-        return prev;
-      }
-      const next = { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
-      console.log("[addSupplierToPart] new partSuppliers state:", JSON.stringify(next));
-      return next;
+      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) return prev;
+      return { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
     });
     setSupplierDraft((prev) => ({ ...prev, [partId]: "" }));
     setSupplierPoDraft((prev) => ({ ...prev, [partId]: "" }));
@@ -717,7 +708,6 @@ export default function CreateEnquiryModal({
       })),
     };
     if (isEdit) payload.enquiryNumber = form.enquiryNumber;
-    console.log("[handleSubmit] FINAL payload.partSuppliers being sent:", JSON.stringify(payload.partSuppliers, null, 2));
     onSubmit(payload);
   };
 
@@ -1938,46 +1928,6 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
-
-                {/* ── General PO Details (Supplier Name / PO Number / Date of Issue) ──
-                    FIX: these three fields feed the top-level `poDetails` object that
-                    EnquiryTable.js, ViewEnquiryModal.js, and the dashboard exports read
-                    from (enq.poDetails.*). This tab previously had NO input elements
-                    bound to form.supplierName / form.poNumber / form.dateOfIssue — only
-                    the "Assign Suppliers to Parts" section below existed — so these three
-                    fields were always submitted empty. Everything else in this file/tab
-                    is unchanged. ── */}
-                <div className="tab-fields-grid">
-                  <div className="tab-field-card">
-                    <label className="bo-label">Supplier Name</label>
-                    <input
-                      type="text"
-                      placeholder="Enter supplier name"
-                      value={form.supplierName}
-                      onChange={(e) => handleChange("supplierName", e.target.value)}
-                    />
-                  </div>
-                  <div className="tab-field-card">
-                    <label className="bo-label">PO Number</label>
-                    <input
-                      type="text"
-                      placeholder="Enter PO number"
-                      value={form.poNumber}
-                      onChange={(e) => handleChange("poNumber", e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="tab-fields-grid single">
-                  <div className="tab-field-card">
-                    <label className="bo-label">Date of Issue</label>
-                    <input
-                      type="date"
-                      value={form.dateOfIssue}
-                      onChange={(e) => handleChange("dateOfIssue", e.target.value)}
-                    />
-                  </div>
-                </div>
-
                 {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number and Date of Issue ── */}
                 <div className="supplier-assign-section">
                   <div className="supplier-assign-title">

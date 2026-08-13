@@ -177,13 +177,45 @@ export default function EnquiryDashboard() {
   const handleSubmit = async (payload) => {
     setIsSubmitting(true);
     try {
+      // Count total suppliers being saved across all parts, for a clear
+      // confirmation message — makes it obvious the data actually went out.
+      const supplierCount = Array.isArray(payload.partSuppliers)
+        ? payload.partSuppliers.reduce(
+            (sum, ps) => sum + (Array.isArray(ps.suppliers) ? ps.suppliers.length : 0),
+            0
+          )
+        : 0;
+
+      let saved;
       if (editData) {
-        await API.put(`/enquiry/update/${editData._id}`, payload);
-        toast.success("Enquiry updated successfully");
+        const res = await API.put(`/enquiry/update/${editData._id}`, payload);
+        saved = res.data;
+        toast.success(
+          `Enquiry updated — ${supplierCount} supplier${supplierCount === 1 ? "" : "s"} saved`
+        );
       } else {
-        await API.post("/enquiry/create", payload);
-        toast.success("Enquiry created successfully");
+        const res = await API.post("/enquiry/create", payload);
+        saved = res.data;
+        toast.success(
+          `Enquiry created — ${supplierCount} supplier${supplierCount === 1 ? "" : "s"} saved`
+        );
       }
+
+      // Sanity check: compare what we sent vs what the server actually
+      // persisted and echoed back. If they don't match, warn immediately
+      // instead of letting it look like a silent success.
+      const savedCount = Array.isArray(saved?.partSuppliers)
+        ? saved.partSuppliers.reduce(
+            (sum, ps) => sum + (Array.isArray(ps.suppliers) ? ps.suppliers.length : 0),
+            0
+          )
+        : 0;
+      if (savedCount !== supplierCount) {
+        toast.warn(
+          `Warning: sent ${supplierCount} supplier(s) but server saved ${savedCount}. Please re-check the enquiry.`
+        );
+      }
+
       setShowCreateModal(false);
       setEditData(null);
       resetAndRefetch(); // [INFINITE SCROLL] was: fetchEnquiries();

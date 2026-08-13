@@ -414,7 +414,37 @@ exports.updateEnquiry = async (req, res) => {
 
     const updated = await doc.save();
 
-    console.log("[updateEnquiry] Saved enquiry partSuppliers:", JSON.stringify(updated.partSuppliers));
+    console.log("[updateEnquiry] Saved enquiry partSuppliers (from .save() return):", JSON.stringify(updated.partSuppliers));
+
+    // Trust nothing: re-read the document fresh from the DB (bypassing any
+    // in-memory Mongoose document state) and verify what actually landed.
+    // If it doesn't match what we intended to write, something dropped it
+    // during the real DB write — surface that loudly instead of returning
+    // a 200 with silently-missing data.
+    const verifyDoc = await Enquiry.findById(req.params.id).lean();
+    const expectedCount = Array.isArray(setData.partSuppliers)
+      ? setData.partSuppliers.reduce((sum, ps) => sum + (Array.isArray(ps.suppliers) ? ps.suppliers.length : 0), 0)
+      : null;
+    const actualCount = Array.isArray(verifyDoc?.partSuppliers)
+      ? verifyDoc.partSuppliers.reduce((sum, ps) => sum + (Array.isArray(ps.suppliers) ? ps.suppliers.length : 0), 0)
+      : 0;
+
+    console.log("[updateEnquiry] Re-read from DB after save, partSuppliers:", JSON.stringify(verifyDoc?.partSuppliers));
+    console.log(`[updateEnquiry] Expected supplier count: ${expectedCount}, actual count in DB: ${actualCount}`);
+
+    if (Object.prototype.hasOwnProperty.call(setData, "partSuppliers") && expectedCount !== actualCount) {
+      console.error("[updateEnquiry] SAVE VERIFICATION FAILED — data was silently dropped during write.", {
+        enquiryId: req.params.id,
+        sentByFrontend: req.body.partSuppliers,
+        normalizedBeforeSave: setData.partSuppliers,
+        actuallyInDbAfterSave: verifyDoc?.partSuppliers,
+      });
+      return res.status(500).json({
+        message: `Save verification failed: expected ${expectedCount} supplier(s) but only ${actualCount} were actually persisted. The update was NOT fully applied — please retry. If this repeats, check the server logs for the exact entries that were dropped.`,
+        expectedCount,
+        actualCount,
+      });
+    }
 
     res.json(updated);
   } catch (err) {

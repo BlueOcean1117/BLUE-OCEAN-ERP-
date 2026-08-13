@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { toast } from "react-toastify";
 
 const EMPTY_FORM = {
   customerName: "",
@@ -546,28 +547,26 @@ export default function CreateEnquiryModal({
     );
 
   /* ── Supplier assignment — a Part can have multiple suppliers, each with its own PO Number and Date of Issue (PO Details tab) ── */
-  const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue, partLabel) => {
+  const addSupplierToPart = (partId, rawValue, rawPoNumber, rawDateOfIssue) => {
     const value = (rawValue || "").trim();
-    const poNumber = (rawPoNumber || "").trim();
-    const dateOfIssue = (rawDateOfIssue || "").trim();
-    if (!value && !poNumber && !dateOfIssue) return; // nothing typed at all — nothing to do
-    // Require all three fields together before a supplier assignment can be added,
-    // per spec: "Do not allow incomplete supplier assignments to be saved."
-    if (!value || !poNumber || !dateOfIssue) {
-      setPartsError(
-        `Please complete Supplier, PO Number and PO Date before adding a supplier${partLabel ? ` for ${partLabel}` : ""}.`
-      );
+    if (!value) {
+      toast.error("Enter a supplier name before clicking Add Supplier.");
       return;
     }
-    setPartsError("");
+    const poNumber = (rawPoNumber || "").trim();
+    const dateOfIssue = (rawDateOfIssue || "").trim();
+
+    const current = partSuppliers[partId] || [];
+    // avoid case-insensitive duplicates on supplier name
+    const isDuplicate = current.some((s) => s.name.toLowerCase() === value.toLowerCase());
+    if (isDuplicate) {
+      toast.error(`"${value}" is already added for this part. Edit or remove the existing chip first.`);
+      return;
+    }
+
     setPartSuppliers((prev) => {
-      const current = prev[partId] || [];
-      // avoid case-insensitive duplicates on supplier name
-      if (current.some((s) => s.name.toLowerCase() === value.toLowerCase())) {
-        setPartsError(`"${value}" is already assigned to this part.`);
-        return prev;
-      }
-      return { ...prev, [partId]: [...current, { name: value, poNumber, dateOfIssue }] };
+      const list = prev[partId] || [];
+      return { ...prev, [partId]: [...list, { name: value, poNumber, dateOfIssue }] };
     });
     setSupplierDraft((prev) => ({ ...prev, [partId]: "" }));
     setSupplierPoDraft((prev) => ({ ...prev, [partId]: "" }));
@@ -664,23 +663,20 @@ export default function CreateEnquiryModal({
 
     // If the user typed a supplier name/PO/Date but never clicked "Add Supplier"
     // (or pressed Enter), that draft text would otherwise be silently lost on save.
-    // Auto-commit any non-empty, COMPLETE leftover drafts into the supplier list here,
-    // per part, right before the payload is built — without mutating existing entries.
-    // NOTE: an incomplete leftover draft (e.g. only a name typed, no PO/date yet) is
-    // simply left out of the save rather than blocking the whole Create/Update — a
-    // stray or partially-typed value must never prevent saving the rest of the form.
+    // Auto-commit any non-empty leftover drafts into the supplier list here, per part,
+    // right before the payload is built — without mutating existing entries.
     const effectivePartSuppliers = { ...partSuppliers };
-    for (const p of parts) {
+    parts.forEach((p) => {
       const draftName = (supplierDraft[p.id] || "").trim();
+      if (!draftName) return; // nothing left in the input for this part — nothing to do
       const draftPo = (supplierPoDraft[p.id] || "").trim();
       const draftDate = (supplierDateDraft[p.id] || "").trim();
-      if (!draftName || !draftPo || !draftDate) continue; // incomplete or empty — skip silently, don't block save
       const current = effectivePartSuppliers[p.id] || [];
       const alreadyExists = current.some((s) => s.name.toLowerCase() === draftName.toLowerCase());
       if (!alreadyExists) {
         effectivePartSuppliers[p.id] = [...current, { name: draftName, poNumber: draftPo, dateOfIssue: draftDate }];
       }
-    }
+    });
 
     // Clean UI-only fields (id/collapsed) before sending to the API.
     const cleanParts = parts.map(({ id, collapsed, children, childDecision, ...rest }) => ({
@@ -1943,52 +1939,6 @@ export default function CreateEnquiryModal({
                   <span className="section-icon po"><IconPO /></span>
                   PO Number Details
                 </div>
-
-                {partsError && (
-                  <div className="parts-error-banner">
-                    <IconAlert /> {partsError}
-                  </div>
-                )}
-
-                {/* ── General PO Details (Supplier Name / PO Number / Date of Issue) ──
-                    FIX: these three fields feed the top-level `poDetails` object that
-                    EnquiryTable.js, ViewEnquiryModal.js, and the dashboard exports read
-                    from (enq.poDetails.*). This tab previously had NO input elements
-                    bound to form.supplierName / form.poNumber / form.dateOfIssue — only
-                    the "Assign Suppliers to Parts" section below existed — so these three
-                    fields were always submitted empty. Everything else in this file/tab
-                    is unchanged. ── */}
-                <div className="tab-fields-grid">
-                  <div className="tab-field-card">
-                    <label className="bo-label">Supplier Name</label>
-                    <input
-                      type="text"
-                      placeholder="Enter supplier name"
-                      value={form.supplierName}
-                      onChange={(e) => handleChange("supplierName", e.target.value)}
-                    />
-                  </div>
-                  <div className="tab-field-card">
-                    <label className="bo-label">PO Number</label>
-                    <input
-                      type="text"
-                      placeholder="Enter PO number"
-                      value={form.poNumber}
-                      onChange={(e) => handleChange("poNumber", e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="tab-fields-grid single">
-                  <div className="tab-field-card">
-                    <label className="bo-label">Date of Issue</label>
-                    <input
-                      type="date"
-                      value={form.dateOfIssue}
-                      onChange={(e) => handleChange("dateOfIssue", e.target.value)}
-                    />
-                  </div>
-                </div>
-
                 {/* ── Assign Suppliers to Parts — each Part can have multiple suppliers, each with its own PO Number and Date of Issue ── */}
                 <div className="supplier-assign-section">
                   <div className="supplier-assign-title">

@@ -727,12 +727,20 @@ export default function CreateEnquiryModal({
         modifiedBOPartNo: firstPart.modifiedBOPartNo || "",
         boPartName: firstPart.boPartName || "",
       },
-      parts: cleanParts,
-      poDetails: {
-        supplierName: form.supplierName,
-        poNumber: form.poNumber,
-        dateOfIssue: form.dateOfIssue || null,
-      },
+     parts: cleanParts,
+poDetails: (() => {
+  const firstPartWithSupplier = parts.find(
+    (p) => (effectivePartSuppliers[p.id] || []).length > 0
+  );
+  const firstSupplier = firstPartWithSupplier
+    ? effectivePartSuppliers[firstPartWithSupplier.id][0]
+    : null;
+  return {
+    supplierName: firstSupplier?.name || form.supplierName || "",
+    poNumber: firstSupplier?.poNumber || form.poNumber || "",
+    dateOfIssue: firstSupplier?.dateOfIssue || form.dateOfIssue || null,
+  };
+})(),
       // Multiple suppliers assigned per Part, keyed by that part's Customer Part No.
       // Each supplier now carries its own poNumber and dateOfIssue alongside its name.
       partSuppliers: parts.map((p) => ({

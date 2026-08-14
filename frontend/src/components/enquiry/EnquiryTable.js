@@ -86,7 +86,9 @@ function EnquiryRowGroup({ enq, onView, onEdit, onDownload }) {
   // dropped from the table (even though it was saved correctly in the DB).
   // Carry it forward here so it still shows up, on the first row, alongside
   // the per-part suppliers instead of disappearing.
-  const hasGeneralPO = !!(enq.poDetails?.supplierName || enq.poDetails?.poNumber || enq.poDetails?.dateOfIssue);
+ const hasGeneralPO =
+  !hasPartSuppliers &&
+  !!(enq.poDetails?.supplierName || enq.poDetails?.poNumber || enq.poDetails?.dateOfIssue);
 
   return rows.map((row, rIdx) => {
     const isFirst = rIdx === 0;

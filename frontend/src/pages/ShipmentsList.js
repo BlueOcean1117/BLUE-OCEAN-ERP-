@@ -6,10 +6,18 @@ import API from "../services/api";
 import "./ShipmentsList.css";
 import { useNavigate, useLocation } from "react-router-dom";
 import BulkShipmentUpload from "./BulkShipmentUpload";
+import GenerateDocumentModal from "./GenerateDocumentModal"; // ✅ NEW
 import { toast } from "react-toastify";
-
+// and typed search terms behave identically.
+function sanitizeSearchInput(value) {
+  if (value === undefined || value === null) return "";
+  let str = String(value);
+  str = str.replace(/[\u200B\u200C\u200D\u2060\uFEFF\u180E]/g, "");
+  str = str.replace(/[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, " ");
+  return str.replace(/\s+/g, " ").trim();
+}
 // ─── helpers ────────────────────────────────────────────────────────────────
-const fmt   = (d) => (d ? new Date(d).toLocaleDateString() : "N/A");
+const fmt   = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "N/A"); // ✅ FIXED — was locale-ambiguous (M/D vs D/M depending on browser), causing ETD dates to display incorrectly and look like they matched searches they didn't
 const fmtDate = (d) => {
   if (!d) return null;
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -22,6 +30,23 @@ const fmtNetWt = (v) => {
   const rounded = Number(n.toFixed(1)); // e.g. 4491.9993 -> 4492
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 };
+
+// ✅ NEW — persist the "entries per page" choice so it survives navigating
+// to another module and back, or reloading the page, until the user
+// changes it again. Kept local to this file, no other logic touched.
+const PAGE_SIZE_STORAGE_KEY = "boe_shipments_pageSize";
+const ALL_ENTRIES = 10000; // same sentinel already used below for "All Entries"
+function getStoredPageSize(fallback) {
+  try {
+    const saved = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+    if (saved === "all") return ALL_ENTRIES;
+    const n = Number(saved);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch (e) {
+    // localStorage unavailable — fall back silently, no functional change
+  }
+  return fallback;
+}
 
 // ─── NEW: date-range helpers for ETD / Supplier ETD filters (frontend-only) ─
 function toDayStart(v) {
@@ -317,7 +342,7 @@ export default function ShipmentsList() {
 
   // Pagination + search
   const [page,     setPage]     = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(() => getStoredPageSize(10)); // ✅ CHANGED — was useState(10), reset every time this page remounted
   const [search,   setSearch]   = useState("");
   const [total,    setTotal]    = useState(0);
 
@@ -333,6 +358,7 @@ export default function ShipmentsList() {
 
   // Log detail modal
   const [selectedLog, setSelectedLog] = useState(null);
+  const [docGenShipment, setDocGenShipment] = useState(null); // ✅ NEW — Generate Document modal target row
 
   // Bulk upload
   const [visibleBulkUploadModal, setVisibleBulkUploadModal] = useState(false);
@@ -397,7 +423,8 @@ export default function ShipmentsList() {
   function fetchAll() {
     setLoading(true);
     setError("");
-    const query = `?page=${page}&pageSize=${pageSize}&search=${search}`;
+   const cleanedSearch = sanitizeSearchInput(search);
+    const query = `?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(cleanedSearch)}`;
     API.get(`/shipment${query}`)
       .then((res) => {
         const raw = Array.isArray(res.data) ? res.data : [];
@@ -953,6 +980,7 @@ export default function ShipmentsList() {
                 Invalid {showStatusAction ? "▲" : "▼"}
               </th>
               <th>Manual Desc</th>
+              <th>Generate Document</th>
             </tr>
           </thead>
           <tbody>
@@ -1146,6 +1174,12 @@ export default function ShipmentsList() {
                     {savingId === r._id ? "Saving..." : "Save"}
                   </button>
                 </td>
+
+                <td>
+                  <button className="btn small" onClick={() => setDocGenShipment(r)}>
+                    Generate Document
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1158,10 +1192,16 @@ export default function ShipmentsList() {
         <span>Page <strong>{page}</strong> of {totalPages}</span>
         <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next ➡</button>
         <select
-          value={pageSize}
+          value={pageSize >= ALL_ENTRIES ? "all" : String(pageSize)}
           onChange={(e) => {
-            setPageSize(e.target.value === "all" ? 10000 : Number(e.target.value));
+            const newSize = e.target.value === "all" ? ALL_ENTRIES : Number(e.target.value);
+            setPageSize(newSize);
             setPage(1);
+            try {
+              window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, e.target.value === "all" ? "all" : String(newSize));
+            } catch (err) {
+              // ignore — persistence is a nice-to-have, not a hard requirement
+            }
           }}
         >
           <option value="5">5</option>
@@ -1172,6 +1212,14 @@ export default function ShipmentsList() {
           <option value="all">All Entries</option>
         </select>
       </div>
+
+      {/* ✅ NEW — Generate Document modal */}
+      {docGenShipment && (
+        <GenerateDocumentModal
+          shipment={docGenShipment}
+          onClose={() => setDocGenShipment(null)}
+        />
+      )}
     </div>
   );
 }

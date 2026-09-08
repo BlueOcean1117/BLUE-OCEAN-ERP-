@@ -65,6 +65,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [directGeneratingType, setDirectGeneratingType] = useState(null); // ✅ NEW
+  const [downloadingAll, setDownloadingAll] = useState(false); // ✅ NEW
 
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +151,38 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     }
   };
 
+  // ✅ NEW — generate all 5 documents as PDFs and download them bundled into
+  // a single ZIP. Reuses the same generate-document pipeline server-side;
+  // this just calls the new /generate-all-documents endpoint.
+  const handleDownloadAll = async () => {
+    try {
+      setDownloadingAll(true);
+      const res = await API.post(
+        `/shipment/${shipment._id}/generate-all-documents`,
+        {},
+        { responseType: "blob" }
+      );
+      const skippedHeader = res.headers?.["x-skipped-documents"];
+      if (skippedHeader) {
+        toast.warn(`Some documents were skipped: ${decodeURIComponent(skippedHeader)}`);
+      }
+      const blob = new Blob([res.data], { type: "application/zip" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Documents_${shipment.enquiry_no || shipment._id}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("All documents generated ✅");
+    } catch (err) {
+      await reportGenerateError(err);
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
@@ -168,12 +201,24 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
         {!selectedType && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
             {loadingList && <div>Loading…</div>}
+
+            {!loadingList && docTypes.length > 0 && (
+              <button
+                className="btn"
+                style={{ textAlign: "left", fontWeight: 600 }}
+                disabled={downloadingAll || directGeneratingType !== null}
+                onClick={handleDownloadAll}
+              >
+                {downloadingAll ? "Generating all 5 documents…" : "⬇ Download All (ZIP)"}
+              </button>
+            )}
+
             {!loadingList && docTypes.map((d) => (
               <button
                 key={d.docType}
                 className="btn"
                 style={{ textAlign: "left" }}
-                disabled={directGeneratingType === d.docType}
+                disabled={directGeneratingType === d.docType || downloadingAll}
                 onClick={() => handleDocTypeClick(d.docType, d.label)}
               >
                 {directGeneratingType === d.docType ? "Generating PDF…" : d.label}

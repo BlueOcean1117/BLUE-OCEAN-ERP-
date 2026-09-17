@@ -23,49 +23,63 @@ const S = `
     display: flex;
     flex-direction: column;
   }
+
+  /* ══════════════════════════════════════════════════════════════════
+     COMPACT HEADER — brand + stepper merged into a single bar instead
+     of two stacked rows (dark header row + separate white stepper row).
+     Only visual: same elements, same click handlers, same conditional
+     classes (active/done) — just laid out side-by-side in one line.
+     ══════════════════════════════════════════════════════════════════ */
   .erp-wizard .hdr {
     background: #0F172A; color: white;
-    padding: 0 20px; height: 44px;
+    padding: 0 16px; height: 38px;
     display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
     /* NOT sticky/fixed — would overlay sidebar and other modules */
     box-shadow: 0 1px 4px rgba(0,0,0,0.4);
   }
-  .erp-wizard .hdr-brand { display: flex; align-items: center; gap: 8px; }
+  .erp-wizard .hdr-brand { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
   .erp-wizard .hdr-logo {
-    width: 24px; height: 24px; background: #2563EB; border-radius: 5px;
+    width: 20px; height: 20px; background: #2563EB; border-radius: 5px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 800; color: white;
+    font-size: 9px; font-weight: 800; color: white;
   }
-  .erp-wizard .hdr-title { font-size: 13px; font-weight: 700; line-height: 1.2; }
-  .erp-wizard .hdr-sub { font-size: 10px; color: #94A3B8; }
+  .erp-wizard .hdr-title { font-size: 12px; font-weight: 700; line-height: 1.2; }
+  .erp-wizard .hdr-sub { font-size: 9.5px; color: #94A3B8; line-height: 1.2; }
+
+  /* Stepper now lives inline inside the dark header bar, so it uses
+     dark-background-friendly colors instead of the previous white
+     card + slate-text treatment. */
   .erp-wizard .stepper {
-    background: white;
-    border-bottom: 1px solid #E2E8F0;
-    padding: 0 20px;
     display: flex; align-items: center;
+    flex-shrink: 0;
   }
   .erp-wizard .stp {
-    display: flex; align-items: center; gap: 5px;
-    padding: 10px 14px 10px 0;
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 12px 0 0;
     cursor: pointer; position: relative;
   }
   .erp-wizard .stp:not(:last-child)::after {
-    content: '›'; position: absolute; right: 2px;
-    color: #CBD5E1; font-size: 13px;
+    content: '›'; position: absolute; right: 3px;
+    color: #475569; font-size: 12px;
   }
   .erp-wizard .stp-num {
-    width: 18px; height: 18px; border-radius: 50%;
+    width: 16px; height: 16px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 9px; font-weight: 800;
-    background: #E2E8F0; color: #64748B;
+    font-size: 8.5px; font-weight: 800;
+    background: #1E293B; color: #94A3B8;
   }
   .erp-wizard .stp.active .stp-num { background: #2563EB; color: white; }
   .erp-wizard .stp.done .stp-num { background: #10B981; color: white; }
-  .erp-wizard .stp-lbl { font-size: 11px; color: #64748B; font-weight: 500; }
-  .erp-wizard .stp.active .stp-lbl { color: #2563EB; font-weight: 700; }
+  .erp-wizard .stp-lbl { font-size: 10.5px; color: #94A3B8; font-weight: 500; white-space: nowrap; }
+  .erp-wizard .stp.active .stp-lbl { color: #93C5FD; font-weight: 700; }
+  .erp-wizard .stp.done .stp-lbl { color: #6EE7B7; }
+
   .erp-wizard .content { flex: 1; padding: 12px 16px 24px; max-width: 960px; width: 100%; margin: 0 auto; }
   @media (max-width: 700px) {
     .erp-wizard .content { padding: 8px 10px 20px; }
+    .erp-wizard .hdr { flex-wrap: wrap; height: auto; padding: 6px 12px; row-gap: 4px; }
+    .erp-wizard .stp-lbl { display: none; }
   }
 `;
 
@@ -170,7 +184,7 @@ export default function Wizard({ id }) {
       <style>{S}</style>
       <div className="erp-wizard">
 
-        {/* ── HEADER ── */}
+        {/* ── HEADER + STEPPER (merged into a single compact bar) ── */}
         <header className="hdr">
           <div className="hdr-brand">
             <div className="hdr-logo">ERP</div>
@@ -181,21 +195,20 @@ export default function Wizard({ id }) {
               </div>
             </div>
           </div>
-        </header>
 
-        {/* ── STEPPER ── */}
-        <div className="stepper">
-          {STEPS.map((s) => (
-            <div
-              key={s.id}
-              className={`stp ${step === s.id ? "active" : step > s.id ? "done" : ""}`}
-              onClick={() => { if (s.id < step) setStep(s.id); }}
-            >
-              <div className="stp-num">{step > s.id ? "✓" : s.id}</div>
-              <span className="stp-lbl">{s.title}</span>
-            </div>
-          ))}
-        </div>
+          <div className="stepper">
+            {STEPS.map((s) => (
+              <div
+                key={s.id}
+                className={`stp ${step === s.id ? "active" : step > s.id ? "done" : ""}`}
+                onClick={() => { if (s.id < step) setStep(s.id); }}
+              >
+                <div className="stp-num">{step > s.id ? "✓" : s.id}</div>
+                <span className="stp-lbl">{s.title}</span>
+              </div>
+            ))}
+          </div>
+        </header>
 
         {/* ── CONTENT ── */}
         <div className="content">
@@ -216,7 +229,7 @@ export default function Wizard({ id }) {
           {/* Step content — only render when data is ready */}
           {!loading && !fetchErr && (
             <>
-              {/* Step1 contains shipment details + tracking + email (merged Step2) */}
+              {/* Step1 contains shipment details + tracking + email  (merged Step2) */}
               {step === 1 && (
                 <Step1 key={formKey} initial={data} onNext={() => setStep(2)} onUpdate={update} />
               )}

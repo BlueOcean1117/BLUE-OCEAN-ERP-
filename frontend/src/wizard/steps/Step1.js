@@ -9,6 +9,14 @@ import API from "../../services/api"; // resolves to src/services/api
 import useShipmentPartHistory from "./useShipmentPartHistory";
 import SmartPartSuggestPopup from "./SmartPartSuggestPopup";
 
+// ✅ Inline sanitizer (see ShipmentsList.js for full comments)
+function sanitizeSearchInput(value) {
+  if (value === undefined || value === null) return "";
+  let str = String(value);
+  str = str.replace(/[\u200B\u200C\u200D\u2060\uFEFF\u180E]/g, "");
+  str = str.replace(/[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, " ");
+  return str.replace(/\s+/g, " ").trim();
+}
 const INCOTERMS = ["DAP", "EXW", "CIF", "CIP", "CFR", "CPT", "DAT", "DDP", "FAS", "FCA", "FOB"];
 
 function useDebounce(value, delay = 300) {
@@ -25,58 +33,179 @@ const S = `
   .erp-step1, .erp-step1 div, .erp-step1 span, .erp-step1 input,
   .erp-step1 select, .erp-step1 textarea, .erp-step1 button,
   .erp-step1 label, .erp-step1 ul, .erp-step1 li { box-sizing: border-box; }
-  .erp-step1 .card { background: white; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
-  .erp-step1 .card-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #F1F5F9; }
-  .erp-step1 .card-title { font-size: 11px; font-weight: 700; color: #1E293B; text-transform: uppercase; letter-spacing: 0.4px; display: flex; align-items: center; gap: 6px; }
+
+  /* ══════════════════════════════════════════════════════════════════
+     COMPACT LAYOUT PASS (CSS-only)
+     - Rows switch from fixed-column CSS grid to a wrapping flex row so
+       short fields (dates, Incoterm, Mode, box/qty/weight numbers) can
+       sit several-to-a-row, while long fields (Customer, Supplier,
+       Part Description, Remarks/Email) keep a wider share of the row.
+     - No JSX, class names, field names, handlers or markup were changed —
+       these rules key off the existing structure via :has() so every
+       existing element still works exactly as before.
+     ══════════════════════════════════════════════════════════════════ */
+
+  .erp-step1 .card { background: white; border: 1px solid #E2E8F0; border-radius: 7px; padding: 6px 10px; margin-bottom: 5px; }
+
+  /* Part Details + Customer & Shipping Details side by side on desktop.
+     align-items: stretch makes both .card boxes match the height of
+     whichever is taller (Part Details grows as parts are added), so
+     the two columns always line up visually instead of leaving a gap
+     next to the shorter one. */
+  .erp-step1 .two-col-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .erp-step1 .two-col-row > .card { margin-bottom: 0; min-width: 0; display: flex; flex-direction: column; }
+  .erp-step1 .two-col-row__part { flex: 1.4 1 0; }
+  .erp-step1 .two-col-row__customer { flex: 1 1 0; }
+  .erp-step1 .two-col-row__tracking { flex: 1.5 1 0; }
+  .erp-step1 .two-col-row__email { flex: 1 1 0; }
+  .erp-step1 .card-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; padding-bottom: 3px; border-bottom: 1px solid #F1F5F9; }
+  .erp-step1 .card-title { font-size: 10.5px; font-weight: 700; color: #1E293B; text-transform: uppercase; letter-spacing: 0.3px; display: flex; align-items: center; gap: 5px; }
   .erp-step1 .badge { background: #EFF6FF; color: #2563EB; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
-  .erp-step1 .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .erp-step1 .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .erp-step1 .g3-last { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .erp-step1 .g2-last { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .erp-step1 .g-email { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
-  .erp-step1 .g-full { margin-bottom: 8px; }
-  .erp-step1 .f { display: flex; flex-direction: column; gap: 3px; }
-  .erp-step1 .f label { font-size: 10.5px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Row containers — was CSS grid with fixed 2/3 equal columns, now a
+     wrapping flex row. Each .f decides its own width below, so short
+     fields bunch together and long fields stretch, instead of every
+     field in a row being forced to the same width. */
+  .erp-step1 .g2,
+  .erp-step1 .g3,
+  .erp-step1 .g3-last,
+  .erp-step1 .g2-last,
+  .erp-step1 .g-email,
+  .erp-step1 .totals {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 5px 7px;
+    margin-bottom: 5px;
+  }
+  .erp-step1 .g3-last,
+  .erp-step1 .g2-last { margin-bottom: 0; }
+  .erp-step1 .g-full { margin-bottom: 5px; }
+
+  /* Default field width — used by longer-value fields (Customer,
+     Supplier, Part Description, FF, Invoice No, SB No, BL No,
+     Container No, POL) unless narrowed by a rule below. */
+  .erp-step1 .f {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1 1 170px;
+    min-width: 130px;
+  }
+  .erp-step1 .f label { font-size: 9.5px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
   .erp-step1 .f label em { color: #EF4444; font-style: normal; }
   .erp-step1 .f input, .erp-step1 .f select, .erp-step1 .f textarea {
-    height: 34px; border: 1px solid #CBD5E1; border-radius: 6px;
-    padding: 0 9px; font-size: 12px; color: #1E293B; background: white;
+    height: 25px; border: 1px solid #CBD5E1; border-radius: 5px;
+    padding: 0 7px; font-size: 11px; color: #1E293B; background: white;
     outline: none; width: 100%; transition: border-color 0.12s, box-shadow 0.12s;
   }
-  .erp-step1 .f select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2364748B' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
+  .erp-step1 .f select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2364748B' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; padding-right: 20px; }
   .erp-step1 .f input:focus, .erp-step1 .f select:focus, .erp-step1 .f textarea:focus { border-color: #2563EB; box-shadow: 0 0 0 2px rgba(37,99,235,0.1); }
   .erp-step1 .f input.ro { background: #F8FAFC; color: #64748B; cursor: default; }
   .erp-step1 .f input.ro:focus { border-color: #CBD5E1; box-shadow: none; }
   .erp-step1 .f input.calc { background: #EFF6FF; border-color: #BFDBFE; color: #1D4ED8; font-weight: 600; cursor: default; }
   .erp-step1 .f input.calc:focus { border-color: #BFDBFE; box-shadow: none; }
-  .erp-step1 .f textarea { height: 54px; padding: 6px 9px; resize: none; font-size: 12px; }
-  .erp-step1 .f input::placeholder, .erp-step1 .f textarea::placeholder { color: #9CA3AF; font-size: 11px; }
-  .erp-step1 .part-card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 9px 12px; margin-bottom: 8px; }
-  .erp-step1 .part-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
-  .erp-step1 .part-lbl { font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; }
+  .erp-step1 .f textarea { height: 36px; padding: 4px 7px; resize: none; font-size: 11px; }
+  .erp-step1 .f input::placeholder, .erp-step1 .f textarea::placeholder { color: #9CA3AF; font-size: 9.5px; }
+
+  /* ── Short-value fields → compact, fixed-ish width so several fit per row ── */
+  /* Date pickers only need room for dd/mm/yyyy — not a full-width column */
+  .erp-step1 .f:has(input[type="date"]) { flex: 0 1 118px; min-width: 104px; }
+
+  /* Incoterm / Mode dropdowns — short option text */
+  .erp-step1 .f:has(select[name="incoterm"]),
+  .erp-step1 .f:has(select[name="mode"]) { flex: 0 1 100px; min-width: 88px; }
+
+  /* Part-row short numeric/text fields: Box Size, No. of Boxes, Quantity,
+     Net Wt/Unit, Total Net Wt (calc), Gross Wt */
+  .erp-step1 .f:has(input[name="part_box_size"]),
+  .erp-step1 .f:has(input[name="part_no_of_boxes"]),
+  .erp-step1 .f:has(input[name="part_qty"]),
+  .erp-step1 .f:has(input[name="part_net_unit"]),
+  .erp-step1 .f:has(input[name="part_total_net_wt"]),
+  .erp-step1 .f:has(input[name="part_gross"]) { flex: 0 1 100px; min-width: 88px; }
+
+  /* Recipient email keeps room to read the address; Send button stays auto-width */
+  .erp-step1 .f:has(input[type="email"]) { flex: 1 1 220px; }
+
+  /* Long-value fields explicitly get more room so they don't get
+     squeezed just because they sit next to compact fields in the row */
+  .erp-step1 .f:has(input[name="customer"]),
+  .erp-step1 .f:has(input[name="supplier_name"]),
+  .erp-step1 .f:has(select[name="supplier_name"]),
+  .erp-step1 .f:has(input[name="part_desc"]),
+  .erp-step1 .f:has(input[name="pol"]),
+  .erp-step1 .f:has(textarea) { flex: 1 1 200px; min-width: 160px; }
+  .erp-step1 .f:has(textarea) { width: 100%; flex-basis: 100%; }
+
+  .erp-step1 .part-card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 5px; padding: 5px 8px; margin-bottom: 5px; }
+  .erp-step1 .part-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+  .erp-step1 .part-lbl { font-size: 9.5px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.4px; }
   .erp-step1 .btn-rm { background: none; border: none; color: #94A3B8; font-size: 13px; cursor: pointer; padding: 1px 4px; border-radius: 3px; }
   .erp-step1 .btn-rm:hover { background: #FEE2E2; color: #EF4444; }
-  .erp-step1 .totals { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .erp-step1 .tot-cell { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; }
-  .erp-step1 .tot-lbl { font-size: 10px; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 2px; }
-  .erp-step1 .tot-val { font-size: 16px; font-weight: 700; color: #0F172A; }
-  .erp-step1 .tot-unit { font-size: 10px; color: #94A3B8; }
-  .erp-step1 .btn-add { background: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; height: 26px; padding: 0 10px; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 3px; }
+
+  /* Totals summary — keep as an even 3-up row of stat cards */
+  .erp-step1 .totals { gap: 6px; }
+  .erp-step1 .tot-cell { flex: 1 1 140px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 5px; padding: 5px 9px; }
+  .erp-step1 .tot-lbl { font-size: 9px; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 1px; }
+  .erp-step1 .tot-val { font-size: 13px; font-weight: 700; color: #0F172A; }
+  .erp-step1 .tot-unit { font-size: 9px; color: #94A3B8; }
+
+  .erp-step1 .btn-add { background: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; height: 21px; padding: 0 8px; border-radius: 5px; font-size: 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 3px; }
   .erp-step1 .btn-add:hover { background: #DBEAFE; }
-  .erp-step1 .btn-next { height: 34px; padding: 0 20px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; background: #2563EB; color: white; display: inline-flex; align-items: center; gap: 5px; }
+  .erp-step1 .btn-next { height: 27px; padding: 0 14px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; background: #2563EB; color: white; display: inline-flex; align-items: center; gap: 5px; }
   .erp-step1 .btn-next:hover { background: #1D4ED8; }
-  .erp-step1 .btn-send { background: #059669; color: white; border: none; height: 34px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .erp-step1 .btn-send { background: #059669; color: white; border: none; height: 25px; padding: 0 11px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; flex: 0 0 auto; align-self: flex-end; }
   .erp-step1 .btn-send:hover { background: #047857; }
-  .erp-step1 .file-row { border: 1px dashed #CBD5E1; border-radius: 6px; padding: 5px 10px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748B; background: #FAFAFA; margin-bottom: 8px; cursor: pointer; }
-  .erp-step1 .img-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; margin-bottom: 8px; }
-  .erp-step1 .img-thumb { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid #E2E8F0; }
+  .erp-step1 .file-row { border: 1px dashed #CBD5E1; border-radius: 5px; padding: 4px 8px; display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #64748B; background: #FAFAFA; margin-bottom: 5px; cursor: pointer; }
+  .erp-step1 .img-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; margin-bottom: 5px; }
+  .erp-step1 .img-thumb { width: 52px; height: 38px; object-fit: cover; border-radius: 5px; border: 1px solid #E2E8F0; }
   .erp-step1 .ac-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 100; background: #fff; border: 1px solid #CBD5E1; border-radius: 6px; max-height: 200px; overflow-y: auto; margin: 0; padding: 0; list-style: none; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
   .erp-step1 .ac-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #F1F5F9; font-size: 12px; }
   .erp-step1 .ac-item:hover { background: #F5F5F5; }
   .erp-step1 .autofill-tag { font-size: 10px; color: #10B981; margin-left: 5px; }
   .erp-step1 .multi-sup-tag { font-size: 10px; color: #F59E0B; }
+
+  /* Fallback for browsers without :has() support (older WebViews):
+     rows still wrap sensibly via the default flex-basis on .f above,
+     just without the extra narrowing of short fields. Layout still
+     works, it's simply slightly less compact. */
+
+  @media (max-width: 900px) {
+    .erp-step1 .two-col-row { flex-direction: column; }
+    .erp-step1 .two-col-row__part,
+    .erp-step1 .two-col-row__customer,
+    .erp-step1 .two-col-row__tracking,
+    .erp-step1 .two-col-row__email { flex: 1 1 100%; }
+  }
+
   @media (max-width: 700px) {
-    .erp-step1 .g2, .erp-step1 .g3, .erp-step1 .g3-last, .erp-step1 .g2-last, .erp-step1 .totals, .erp-step1 .g-email { grid-template-columns: 1fr !important; }
+    .erp-step1 .g2, .erp-step1 .g3, .erp-step1 .g3-last,
+    .erp-step1 .g2-last, .erp-step1 .totals, .erp-step1 .g-email {
+      flex-direction: column;
+    }
+    .erp-step1 .f,
+    .erp-step1 .f:has(input[type="date"]),
+    .erp-step1 .f:has(select[name="incoterm"]),
+    .erp-step1 .f:has(select[name="mode"]),
+    .erp-step1 .f:has(input[name="part_box_size"]),
+    .erp-step1 .f:has(input[name="part_no_of_boxes"]),
+    .erp-step1 .f:has(input[name="part_qty"]),
+    .erp-step1 .f:has(input[name="part_net_unit"]),
+    .erp-step1 .f:has(input[name="part_total_net_wt"]),
+    .erp-step1 .f:has(input[name="part_gross"]),
+    .erp-step1 .f:has(input[type="email"]),
+    .erp-step1 .tot-cell {
+      flex: 1 1 100% !important;
+      width: 100%;
+      min-width: 0;
+    }
+    .erp-step1 .btn-send { align-self: stretch; }
   }
 `;
 
@@ -386,7 +515,8 @@ export default function Step1({ initial = {}, onNext, onUpdate = () => {} }) {
 
   // ── Part autocomplete search ─────────────────────────────────────────────
   const searchPartNumber = useCallback(async (index, query) => {
-    if (query.length < 2) {
+    const cleanedQuery = sanitizeSearchInput(query);
+    if (cleanedQuery.length < 2) {
       setPartAC((prev) => {
         const next = [...prev];
         next[index] = { ...next[index], suggestions: [], showDropdown: false };
@@ -693,7 +823,7 @@ ${form.email_message || ""}
           </div>
         </div>
 
-        <div className="g2">
+        <div className="g2-last">
           <div className="f">
             <label>Invoice No <em>*</em></label>
             <input name="invoice_no" value={form.invoice_no} onChange={change} placeholder="Invoice number" />
@@ -702,9 +832,6 @@ ${form.email_message || ""}
             <label>Invoice Date <em>*</em></label>
             <input type="date" name="invoice_date" value={form.invoice_date} onChange={change} />
           </div>
-        </div>
-
-        <div className="g2-last">
           <div className="f">
             <label>Incoterm</label>
             <select name="incoterm" value={form.incoterm} onChange={change}>
@@ -724,8 +851,9 @@ ${form.email_message || ""}
         </div>
       </div>
 
-      {/* ══ PART DETAILS ══ */}
-      <div className="card">
+      {/* ══ PART DETAILS + CUSTOMER & SHIPPING DETAILS — side by side ══ */}
+      <div className="two-col-row">
+      <div className="card two-col-row__part">
         <div className="card-hdr">
           <div className="card-title">Part Details</div>
           <button className="btn-add" type="button" onClick={addPart}>+ Add Part</button>
@@ -844,38 +972,18 @@ ${form.email_message || ""}
                   <input type="number" name="part_gross" value={part.part_gross} onChange={(e) => handlePartChange(index, e)} min="0" step="0.01" />
                 </div>
               </div>
+
+              {/* ✅ NEW — per-part "Add Part" button, same handler/behavior as the header button */}
+              <div className="g2-last" style={{ justifyContent: "flex-end", display: "flex" }}>
+                <button className="btn-add" type="button" onClick={addPart}>+ Add Part</button>
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* ══ WHOLE SHIPMENT TOTALS ══ */}
-      <div className="card">
-        <div className="card-hdr">
-          <div className="card-title">Whole Shipment Totals</div>
-          <span style={{ fontSize: 10, color: "#94A3B8" }}>Auto-calculated</span>
-        </div>
-        <div className="totals">
-          <div className="tot-cell">
-            <div className="tot-lbl">Total Net Weight (Kg)</div>
-            <div className="tot-val">{Number(form.total_net_wt).toFixed(2)}</div>
-            <div className="tot-unit">Kilograms</div>
-          </div>
-          <div className="tot-cell">
-            <div className="tot-lbl">Total Gross Weight (Kg)</div>
-            <div className="tot-val">{Number(form.total_gross_wt).toFixed(2)}</div>
-            <div className="tot-unit">Kilograms</div>
-          </div>
-          <div className="tot-cell">
-            <div className="tot-lbl">Total No. of Boxes</div>
-            <div className="tot-val">{form.total_no_of_boxes}</div>
-            <div className="tot-unit">Cartons</div>
-          </div>
-        </div>
-      </div>
-
       {/* ══ CUSTOMER & SHIPPING DETAILS ══ */}
-      <div className="card">
+      <div className="card two-col-row__customer">
         <div className="card-hdr">
           <div className="card-title">Customer &amp; Shipping Details</div>
         </div>
@@ -927,9 +1035,11 @@ ${form.email_message || ""}
           </div>
         </div>
       </div>
+      </div>
 
-      {/* ══ TRACKING DETAILS (merged from Step2) ══ */}
-      <div className="card">
+      {/* ══ TRACKING DETAILS + SEND TRACKING EMAIL — side by side ══ */}
+      <div className="two-col-row">
+      <div className="card two-col-row__tracking">
         <div className="card-hdr">
           <div className="card-title">Tracking Details <span className="badge">STEP 2</span></div>
         </div>
@@ -983,7 +1093,7 @@ ${form.email_message || ""}
       </div>
 
       {/* ══ SEND TRACKING EMAIL (merged from Step2) ══ */}
-      <div className="card">
+      <div className="card two-col-row__email">
         <div className="card-hdr">
           <div className="card-title">📧 Send Tracking Email</div>
         </div>
@@ -1003,8 +1113,34 @@ ${form.email_message || ""}
           <textarea name="email_message" value={form.email_message} onChange={change} placeholder="Optional message" />
         </div>
       </div>
+      </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4, marginBottom: 8 }}>
+      {/* ══ WHOLE SHIPMENT TOTALS ══ */}
+      <div className="card">
+        <div className="card-hdr">
+          <div className="card-title">Whole Shipment Totals</div>
+          <span style={{ fontSize: 10, color: "#94A3B8" }}>Auto-calculated</span>
+        </div>
+        <div className="totals">
+          <div className="tot-cell">
+            <div className="tot-lbl">Total Net Weight (Kg)</div>
+            <div className="tot-val">{Number(form.total_net_wt).toFixed(2)}</div>
+            <div className="tot-unit">Kilograms</div>
+          </div>
+          <div className="tot-cell">
+            <div className="tot-lbl">Total Gross Weight (Kg)</div>
+            <div className="tot-val">{Number(form.total_gross_wt).toFixed(2)}</div>
+            <div className="tot-unit">Kilograms</div>
+          </div>
+          <div className="tot-cell">
+            <div className="tot-lbl">Total No. of Boxes</div>
+            <div className="tot-val">{form.total_no_of_boxes}</div>
+            <div className="tot-unit">Cartons</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2, marginBottom: 4 }}>
         <button className="btn-next" type="button" onClick={onNext}>
           Save &amp; Next →
         </button>

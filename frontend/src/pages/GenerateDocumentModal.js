@@ -67,6 +67,13 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [directGeneratingType, setDirectGeneratingType] = useState(null); // ✅ NEW
   const [downloadingAll, setDownloadingAll] = useState(false); // ✅ NEW
 
+  // ✅ NEW — Label Document (6th option). Fully isolated state; nothing
+  // above this touches or reads these.
+  const [labelStep, setLabelStep] = useState(null); // null | "choose" | "form"
+  const [labelMode, setLabelMode] = useState(null); // "single" | "multiple"
+  const [poInputs, setPoInputs] = useState([""]);
+  const [labelGenerating, setLabelGenerating] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     API.get(`/shipment/${shipment._id}/document-types`)
@@ -183,6 +190,86 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     }
   };
 
+  // ✅ NEW — Label Document handlers. Isolated from every handler above;
+  // none of the existing 5-document logic is called or modified here.
+  const startLabelFlow = () => {
+    setLabelStep("choose");
+    setLabelMode(null);
+    setPoInputs([""]);
+  };
+
+  const chooseLabelMode = (mode) => {
+    setLabelMode(mode);
+    setPoInputs([""]);
+    setLabelStep("form");
+  };
+
+  const updatePoInput = (idx, value) => {
+    setPoInputs((prev) => prev.map((v, i) => (i === idx ? value : v)));
+  };
+
+  const addPoInput = () => setPoInputs((prev) => [...prev, ""]);
+  const removePoInput = (idx) => setPoInputs((prev) => prev.filter((_, i) => i !== idx));
+
+  const backToDocList = () => {
+    setLabelStep(null);
+    setLabelMode(null);
+    setPoInputs([""]);
+  };
+
+  const handleGenerateLabels = async () => {
+    const poNumbers = poInputs.map((p) => p.trim()).filter(Boolean);
+    if (poNumbers.length === 0) {
+      toast.error("Enter at least one PO Number");
+      return;
+    }
+    try {
+      setLabelGenerating(true);
+      const res = await API.post(
+        `/shipment/${shipment._id}/generate-label`,
+        { poNumbers },
+        { responseType: "blob" }
+      );
+      const contentType = res.headers?.["content-type"] || "";
+      const isZip = contentType.includes("zip");
+      const blob = new Blob([res.data], { type: isZip ? "application/zip" : "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = isZip ? `Labels_${Date.now()}.zip` : `Label_${poNumbers[0]}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      const skippedHeader = res.headers?.["x-skipped-pos"];
+      if (skippedHeader) {
+        toast.warn(`Some PO Numbers were skipped: ${decodeURIComponent(skippedHeader)}`);
+      }
+      toast.success("Label document generated ✅");
+    } catch (err) {
+      // ✅ NEW — Label-specific error handling: surfaces the *actual* reason
+      // (from the backend's `details` array — e.g. "PO Number not found.")
+      // instead of just the generic top-level message, since that's the
+      // whole point of this toast for debugging a specific PO.
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          const details = Array.isArray(parsed.details) ? parsed.details.join(" | ") : "";
+          toast.error(details || parsed.message || "Failed to generate label");
+        } catch {
+          toast.error("Failed to generate label");
+        }
+      } else {
+        const details = Array.isArray(err.response?.data?.details) ? err.response.data.details.join(" | ") : "";
+        toast.error(details || err.response?.data?.message || "Failed to generate label");
+      }
+    } finally {
+      setLabelGenerating(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
@@ -198,7 +285,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
           Shipment: <strong>{shipment.enquiry_no}</strong> — Invoice {shipment.invoice_no || "—"}
         </p>
 
-        {!selectedType && (
+        {!selectedType && !labelStep && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
             {loadingList && <div>Loading…</div>}
 
@@ -224,6 +311,77 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                 {directGeneratingType === d.docType ? "Generating PDF…" : d.label}
               </button>
             ))}
+
+            {/* ✅ NEW — 6th option, added below the existing 5. Existing
+                buttons above are completely untouched. */}
+            {!loadingList && (
+              <button
+                className="btn"
+                style={{ textAlign: "left" }}
+                onClick={startLabelFlow}
+              >
+                Label Document
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ✅ NEW — Label Document: Step 1, One PO vs Multiple PO */}
+        {labelStep === "choose" && (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn small" style={{ marginBottom: 10 }} onClick={backToDocList}>
+              ← Back to document list
+            </button>
+            <p style={{ fontSize: 14, marginBottom: 10 }}>
+              Is this shipment for one PO Number or multiple PO Numbers?
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn" onClick={() => chooseLabelMode("single")}>
+                One PO Number
+              </button>
+              <button className="btn" onClick={() => chooseLabelMode("multiple")}>
+                Multiple PO Numbers
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ NEW — Label Document: Step 2, PO Number entry + generate */}
+        {labelStep === "form" && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              className="btn small"
+              style={{ marginBottom: 10 }}
+              onClick={() => setLabelStep("choose")}
+            >
+              ← Back
+            </button>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              {poInputs.map((val, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder={labelMode === "single" ? "PO Number (e.g. MB00003256)" : `PO Number ${idx + 1}`}
+                    value={val}
+                    onChange={(e) => updatePoInput(idx, e.target.value)}
+                    style={{ flex: 1, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4 }}
+                  />
+                  {labelMode === "multiple" && poInputs.length > 1 && (
+                    <button className="btn small" onClick={() => removePoInput(idx)}>✕</button>
+                  )}
+                </div>
+              ))}
+              {labelMode === "multiple" && (
+                <button className="btn small" style={{ alignSelf: "flex-start" }} onClick={addPoInput}>
+                  + Add another PO Number
+                </button>
+              )}
+            </div>
+
+            <button className="btn" disabled={labelGenerating} onClick={handleGenerateLabels}>
+              {labelGenerating ? "Generating label(s)…" : "Generate Label"}
+            </button>
           </div>
         )}
 

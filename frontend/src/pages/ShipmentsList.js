@@ -761,7 +761,7 @@ export default function ShipmentsList() {
         </button>
       </div>
  
-      {/* ── SCROLLABLE BODY ─────────────────────────────────── */}
+      {/* ── SCROLLABLE BODY ──────────────────────────── */}
       <div className="sml-modal__body">
  
         {/* ── SECTION 1 : Shipment Information ── */}
@@ -1200,7 +1200,7 @@ export default function ShipmentsList() {
             try {
               window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, e.target.value === "all" ? "all" : String(newSize));
             } catch (err) {
-              // ignore — persistence is a nice-to-have, not a hard requirement
+              // ignore — persistence is a nice to have, not a hard requirement
             }
           }}
         >

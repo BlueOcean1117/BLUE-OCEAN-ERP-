@@ -38,6 +38,11 @@ const PDF_FILENAMES = {
   scomet: "SCOMET_Declaration.pdf",
   authority_letter: "Authority_Letter.pdf",
   cargo_security_declaration: "Cargo_Security_Declaration.pdf",
+  // ✅ NEW — Technologies
+  tech_end_use_letter: "End_Use_Letter.pdf",
+  tech_scomet: "SCOMET_Declaration.pdf",
+  tech_authority_letter: "Authority_Letter.pdf",
+  tech_cargo_security_declaration: "Cargo_Security_Declaration.pdf",
 };
 
 // ✅ NEW — shared error decoder (unchanged logic, pulled out so both the
@@ -57,6 +62,7 @@ async function reportGenerateError(err) {
 }
 
 export default function GenerateDocumentModal({ shipment, onClose }) {
+  const [category, setCategory] = useState(null); // ✅ NEW — null | "consulting" | "technologies"
   const [docTypes, setDocTypes] = useState([]);
   const [selectedType, setSelectedType] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -165,7 +171,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     try {
       setDownloadingAll(true);
       const res = await API.post(
-        `/shipment/${shipment._id}/generate-all-documents`,
+        `/shipment/${shipment._id}/generate-all-documents?category=${category}`, // ✅ CHANGED
         {},
         { responseType: "blob" }
       );
@@ -227,7 +233,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       setLabelGenerating(true);
       const res = await API.post(
         `/shipment/${shipment._id}/generate-label`,
-        { poNumbers },
+        { poNumbers, category }, // ✅ CHANGED — category added
         { responseType: "blob" }
       );
       const contentType = res.headers?.["content-type"] || "";
@@ -285,22 +291,38 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
           Shipment: <strong>{shipment.enquiry_no}</strong> — Invoice {shipment.invoice_no || "—"}
         </p>
 
-        {!selectedType && !labelStep && (
+        {/* ✅ NEW — Step 0: Consulting / Technologies */}
+        {!category && !selectedType && !labelStep && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+            <button className="btn" style={{ textAlign: "left" }} onClick={() => setCategory("consulting")}>
+              Consulting
+            </button>
+            <button className="btn" style={{ textAlign: "left" }} onClick={() => setCategory("technologies")}>
+              Technologies
+            </button>
+          </div>
+        )}
+
+        {category && !selectedType && !labelStep && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+            <button className="btn small" style={{ alignSelf: "flex-start" }} onClick={() => setCategory(null)}>
+              ← Back
+            </button>
+
             {loadingList && <div>Loading…</div>}
 
-            {!loadingList && docTypes.length > 0 && (
+            {!loadingList && docTypes.filter((d) => d.category === category).length > 0 && (
               <button
                 className="btn"
                 style={{ textAlign: "left", fontWeight: 600 }}
                 disabled={downloadingAll || directGeneratingType !== null}
                 onClick={handleDownloadAll}
               >
-                {downloadingAll ? "Generating all 5 documents…" : "⬇ Download All (ZIP)"}
+                {downloadingAll ? "Generating all documents…" : "⬇ Download All (ZIP)"}
               </button>
             )}
 
-            {!loadingList && docTypes.map((d) => (
+            {!loadingList && docTypes.filter((d) => d.category === category).map((d) => (
               <button
                 key={d.docType}
                 className="btn"

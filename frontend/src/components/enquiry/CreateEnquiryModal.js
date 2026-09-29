@@ -117,7 +117,7 @@ function extractDigits(partNo, position = "first", count = 3) {
 /* ─────────────────────────────────────────────
    BO Part Number Builder Drawer Component
 ───────────────────────────────────────────── */
-const COMPANY_CODES  = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA",];
+const COMPANY_CODES  = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN"];
 const FIXED_PREFIX   = "B";
 
 function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {

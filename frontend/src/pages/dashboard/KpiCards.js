@@ -44,10 +44,7 @@ export default function KpiCards({ kpis }) {
       <KpiCard icon="transit" iconColor="#1E40AF" iconBg="#DBEAFE" label="In Transit" value={kpis.inTransit} />
       <KpiCard icon="check" iconColor="#065F46" iconBg="#D1FAE5" label="Delivered" value={kpis.delivered} />
       <KpiCard icon="clock" iconColor="#92400E" iconBg="#FEF9C3" label="Pending / Delayed" value={kpis.pendingOrDelayed} sub={`${kpis.pendingCount} pending · ${kpis.delayedCount} delayed`} />
-      <KpiCard icon="wallet" iconColor="#94A3B8" iconBg="#F1F5F9" label="Unpaid / Payment Pending" unavailable sub="Payment status isn't captured in the Shipment module yet" />
       <KpiCard icon="target" iconColor="#0F766E" iconBg="#CCFBF1" label="On-Time Delivery %" value={kpis.onTimePct !== null ? `${kpis.onTimePct}%` : null} unavailable={kpis.onTimePct === null} sub={kpis.onTimePct !== null ? "Delivered ÷ (Delivered + Delayed)" : "No delivered or delayed shipments yet"} />
-      <KpiCard icon="gauge" iconColor="#6D28D9" iconBg="#EDE9FE" label="Avg Transit Time" value={kpis.avgTransitDays !== null ? `${kpis.avgTransitDays} days` : null} unavailable={kpis.avgTransitDays === null} sub={kpis.avgTransitDays !== null ? "ETD → Delivery date, averaged" : "No shipment has both ETD and delivery date"} />
-      <KpiCard icon="cash" iconColor="#94A3B8" iconBg="#F1F5F9" label="Total Shipment Value" unavailable sub="Shipment value isn't captured in the Shipment module yet" />
     </div>
   );
 }

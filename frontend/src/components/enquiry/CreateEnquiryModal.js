@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { toast } from "react-toastify";
+import { loadEnquiryDraft, saveEnquiryDraft, markEnquiryDraftClosed, clearEnquiryDraft, isDraftEmpty } from "./draft";
 
 const EMPTY_FORM = {
   customerName: "",
@@ -115,244 +116,18 @@ function extractDigits(partNo, position = "first", count = 3) {
   return "";
 }
 /* ─────────────────────────────────────────────
-   BO Part Number Builder Drawer Component
+   BO Part Number generation — now INLINE (no side panel).
+   Formula is unchanged:  <customer prefix> + "B" + <first 3> + <process code> + <last 3>
 ───────────────────────────────────────────── */
-const COMPANY_CODES  = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN"];
-const FIXED_PREFIX   = "B";
+const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN"];
+const FIXED_PREFIX     = "B";
+// The old builder always started with "ZET" (it just wasn't in its dropdown, so the dropdown
+// showed "FAB" while the number used "ZET"). It is now a real, visible option and the default.
+const BO_DEFAULT_CODE  = "ZET";
+const PROCESS_CODES    = [BO_DEFAULT_CODE, ...COMPANY_CODES];
 
-function BOBuilderDrawer({ isOpen, onClose, onApply, formData }) {
-  /* Snapshot values at the moment the drawer opens */
-  const [snapshot, setSnapshot] = useState({ customerName: "", customerPartNo: "" });
-
-  /* configurable state */
-  const [customerPrefix, setCustomerPrefix] = useState("");
-  const [companyCode,    setCompanyCode]    = useState("ZET");
-  const [customCode,     setCustomCode]     = useState("");
-  const [first3,         setFirst3]         = useState("");
-  const [last3,          setLast3]          = useState("");
-
-  /* Capture a fresh snapshot and re-init every time the drawer opens */
-  useEffect(() => {
-    if (isOpen) {
-      const name   = formData.customerName   || "";
-      const partNo = formData.customerPartNo || "";
-      setSnapshot({ customerName: name, customerPartNo: partNo });
-      setCustomerPrefix(derivePrefix(name));
-      setFirst3(extractDigits(partNo, "first", 3));
-      setLast3(extractDigits(partNo, "last",  3));
-      setCompanyCode("ZET");
-      setCustomCode("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
-
-  /* Also keep first3/last3 in sync if customerPartNo changes WHILE drawer is open */
-  useEffect(() => {
-    if (isOpen) {
-      const name   = formData.customerName   || "";
-      const partNo = formData.customerPartNo || "";
-      if (name !== snapshot.customerName) {
-        setCustomerPrefix(derivePrefix(name));
-      }
-      if (partNo !== snapshot.customerPartNo) {
-        setFirst3(extractDigits(partNo, "first", 3));
-        setLast3(extractDigits(partNo, "last",  3));
-      }
-      setSnapshot({ customerName: name, customerPartNo: partNo });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.customerName, formData.customerPartNo]);
-
-  /* Use snapshot for display in auto-fetch section */
-  const customerName   = snapshot.customerName;
-  const customerPartNo = snapshot.customerPartNo;
-
-  /* live preview */
-  const resolvedCode   = companyCode === "Custom" ? customCode  : companyCode;
-  const generatedPartNo = `${customerPrefix}${FIXED_PREFIX}${first3}${resolvedCode}${last3}`;
-
-  const handleApply = () => {
-    onApply(generatedPartNo);
-    onClose();
-  };
-
-  /* Trap body scroll when open */
-  useEffect(() => {
-    document.body.style.overflow = isOpen ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [isOpen]);
-
-  return (
-    <>
-      {/* Backdrop — semi-transparent, does NOT close the main modal */}
-      <div
-        className={`bo-drawer-backdrop${isOpen ? " open" : ""}`}
-        onClick={onClose}
-      />
-
-      {/* Drawer panel */}
-      <div className={`bo-drawer${isOpen ? " open" : ""}`} onClick={e => e.stopPropagation()}>
-        {/* Drawer Header */}
-        <div className="bo-drawer-header">
-          <div className="bo-drawer-title">
-            <span className="bo-drawer-title-icon"><IconWand /></span>
-            <div>
-              <h3>BO Part Number Builder</h3>
-              <p>Configure and generate the Modified BO Part Number</p>
-            </div>
-          </div>
-          <button className="bo-drawer-close" onClick={onClose}><IconClose /></button>
-        </div>
-
-        <div className="bo-drawer-body">
-
-          {/* ── AUTO-FETCHED SECTION ── */}
-          <div className="bo-drawer-section">
-            <div className="bo-drawer-section-label">
-              <span className="bo-ds-dot fetch" />
-              Auto-Fetched Details
-            </div>
-            <div className="bo-fetch-grid">
-              <div className="bo-fetch-item">
-                <span className="bo-fetch-key">Customer Name</span>
-                <span className="bo-fetch-val">{customerName || <em>Not entered yet</em>}</span>
-              </div>
-              <div className="bo-fetch-item">
-                <span className="bo-fetch-key">Customer Prefix</span>
-                <span className="bo-fetch-val highlight">{derivePrefix(customerName) || "—"}</span>
-              </div>
-              <div className="bo-fetch-item">
-                <span className="bo-fetch-key">Original Part No</span>
-                <span className="bo-fetch-val">{customerPartNo || <em>Not entered yet</em>}</span>
-              </div>
-              <div className="bo-fetch-item">
-                <span className="bo-fetch-key">First 3 Digits</span>
-                <span className="bo-fetch-val highlight">{first3 || "—"}</span>
-              </div>
-              <div className="bo-fetch-item">
-                <span className="bo-fetch-key">Last 3 Digits</span>
-                <span className="bo-fetch-val highlight">{last3 || "—"}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* ── CONFIGURE SECTION ── */}
-          <div className="bo-drawer-section">
-            <div className="bo-drawer-section-label">
-              <span className="bo-ds-dot config" />
-              Configure
-            </div>
-
-            <div className="bo-config-grid">
-              {/* Customer Prefix (editable) */}
-              <div className="bo-config-field">
-                <label>Customer Prefix</label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={customerPrefix}
-                  onChange={e => setCustomerPrefix(e.target.value.toUpperCase())}
-                  placeholder="e.g. F"
-                />
-              </div>
-
-              {/* Prefix Type — static readonly display, always "B" */}
-              <div className="bo-config-field">
-                <label>Prefix Type</label>
-                <input
-                  type="text"
-                  value={FIXED_PREFIX}
-                  readOnly
-                  style={{ background: "#f3f4f6", color: "#6b7280", cursor: "not-allowed" }}
-                />
-              </div>
-
-              {/* First 3 */}
-              <div className="bo-config-field">
-                <label>First 3 Digits</label>
-                <input
-                  type="text"
-                  maxLength={3}
-                  value={first3}
-                  onChange={e => setFirst3(e.target.value.replace(/\D/g,""))}
-                  placeholder="e.g. 051"
-                />
-              </div>
-
-              {/* Process Code */}
-              <div className="bo-config-field">
-                <label>Process Code</label>
-                <select value={companyCode} onChange={e => setCompanyCode(e.target.value)}>
-                  {COMPANY_CODES.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-                {companyCode === "Custom" && (
-                  <input
-                    type="text"
-                    className="bo-custom-input"
-                    placeholder="Enter custom code"
-                    value={customCode}
-                    onChange={e => setCustomCode(e.target.value.toUpperCase())}
-                  />
-                )}
-              </div>
-
-              {/* Last 3 */}
-              <div className="bo-config-field">
-                <label>Last 3 Digits</label>
-                <input
-                  type="text"
-                  maxLength={3}
-                  value={last3}
-                  onChange={e => setLast3(e.target.value.replace(/\D/g,""))}
-                  placeholder="e.g. 007"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ── LIVE PREVIEW ── */}
-          <div className="bo-drawer-section">
-            <div className="bo-drawer-section-label">
-              <span className="bo-ds-dot preview" />
-              Live Preview
-            </div>
-            <div className="bo-live-preview">
-              <span className="bo-preview-label">Generated BO Part Number</span>
-              <div className="bo-preview-value">
-                {generatedPartNo || <span className="bo-preview-empty">Fill fields above to generate</span>}
-              </div>
-              <div className="bo-preview-breakdown">
-                <span className="bp-chip cust">{customerPrefix || "—"}</span>
-                <span className="bp-sep">+</span>
-                <span className="bp-chip prefix">{FIXED_PREFIX}</span>
-                <span className="bp-sep">+</span>
-                <span className="bp-chip digits">{first3 || "—"}</span>
-                <span className="bp-sep">+</span>
-                <span className="bp-chip code">{resolvedCode || "—"}</span>
-                <span className="bp-sep">+</span>
-                <span className="bp-chip digits">{last3 || "—"}</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Drawer Footer */}
-        <div className="bo-drawer-footer">
-          <button className="bo-drawer-cancel" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="bo-drawer-apply"
-            onClick={handleApply}
-            disabled={!generatedPartNo}
-          >
-            <IconCheck /> Apply BO Part Number
-          </button>
-        </div>
-      </div>
-    </>
-  );
+function buildBOPartNo(customerName, customerPartNo, code) {
+  return `${derivePrefix(customerName)}${FIXED_PREFIX}${extractDigits(customerPartNo, "first", 3)}${code}${extractDigits(customerPartNo, "last", 3)}`;
 }
 
 /* ─────────────────────────────────────────────
@@ -370,6 +145,12 @@ const makeEmptyPart = () => ({
   isChildPart: false,
   collapsed: false,
   children: [],
+  itemDescription: "",   // part-specific description (optional)
+  showItemDesc: false,   // UI only: is the description box open?
+  boNumberMode: "auto",  // "auto" | "customerPartNumber"
+  boAutoMemo: null,      // UI only: last auto-generated BO No, restored when switching back
+
+  boProcessCode: BO_DEFAULT_CODE, // UI only
   // "null"  = not yet answered the Yes/No child-part prompt
   // "yes"   = user chose to add child parts (existing Add Child Part UI shown)
   // "no"    = user chose to skip child parts for this parent part
@@ -383,7 +164,88 @@ const makeEmptyChildPart = () => ({
   modifiedBOPartNo: "",
   boPartName: "",
   isChildPart: true,
+  itemDescription: "",
+  showItemDesc: false,
+  boNumberMode: "auto",
+  boAutoMemo: null,
+
+  boProcessCode: BO_DEFAULT_CODE, // UI only
 });
+
+/* ─────────────────────────────────────────────
+   BO Number mode toggle (per part / child part)
+   "auto"               → existing BO Part Number Builder, unchanged
+   "customerPartNumber" → BO Number mirrors the Customer Part No
+───────────────────────────────────────────── */
+function BONumberModeToggle({ name, mode, onChange }) {
+  return (
+    <div className="bo-mode-toggle" role="radiogroup" aria-label="BO Number mode">
+      <span className="bo-mode-toggle-label">BO Number</span>
+      <label className={mode !== "customerPartNumber" ? "selected" : ""}>
+        <input type="radio" name={name} checked={mode !== "customerPartNumber"} onChange={() => onChange("auto")} />
+        Auto Generate
+      </label>
+      <label className={mode === "customerPartNumber" ? "selected" : ""}>
+        <input type="radio" name={name} checked={mode === "customerPartNumber"} onChange={() => onChange("customerPartNumber")} />
+        Same as Customer Part Number
+      </label>
+    </div>
+  );
+}
+
+/* Process Code dropdown + Generate button, shown inline in the BO Number strip. */
+function BOGenerateControl({ code, hasValue, canGenerate, onCodeChange, onGenerate }) {
+  return (
+    <div className="bo-gen-inline">
+      <label className="bo-code-label">Process Code</label>
+      <select className="bo-code-select" value={code || BO_DEFAULT_CODE} onChange={(e) => onCodeChange(e.target.value)} aria-label="Process code">
+        {PROCESS_CODES.map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <button
+        type="button"
+        className="bo-generate-btn"
+        onClick={onGenerate}
+        disabled={!canGenerate}
+        title={canGenerate ? "" : "Enter the Customer Part No first"}
+      >
+        <span className="bo-generate-btn-icon"><IconWand /></span>
+        {hasValue ? "Rebuild BO Part Number" : "Generate BO Part Number"}
+      </button>
+    </div>
+  );
+}
+
+/* Optional part-specific Item Description. Hidden behind "+ Add Item Description"
+   so nobody is forced to type one; with none, the common description applies. */
+function PartItemDescription({ shown, value, onShow, onChange, onRemove }) {
+  if (!shown) {
+    return (
+      <div className="item-desc-cell">
+        <label className="part-label">Item Description</label>
+        <button type="button" className="item-desc-add-btn" onClick={onShow}>
+          <IconPlus /> Add Item Description
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="item-desc-box item-desc-cell">
+      <div className="item-desc-head">
+        <label className="part-label" title="This description applies to this part only">Item Description (own)</label>
+        <button type="button" className="item-desc-remove-btn" onClick={onRemove} title="Remove — use the common Item Description" aria-label="Use common Item Description">
+          <IconClose />
+        </button>
+      </div>
+      <input
+        type="text"
+        placeholder="Enter description..."
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        autoFocus={!value}
+      />
+    </div>
+  );
+}
 
 /* ─────────────────────────────────────────────
    Main Modal
@@ -434,6 +296,12 @@ export default function CreateEnquiryModal({
           customerPartName: p.customerPartName || "",
           modifiedBOPartNo: p.modifiedBOPartNo || "",
           boPartName: p.boPartName || "",
+          itemDescription: p.itemDescription || "",
+          showItemDesc: !!p.itemDescription,
+          boNumberMode: p.boNumberMode === "customerPartNumber" ? "customerPartNumber" : "auto",
+          boAutoMemo: null,
+
+          boProcessCode: BO_DEFAULT_CODE, // UI only
           isChildPart: false,
           collapsed: false,
           // If this part already has saved child parts, treat the prompt as
@@ -446,6 +314,12 @@ export default function CreateEnquiryModal({
                 customerPartName: c.customerPartName || "",
                 modifiedBOPartNo: c.modifiedBOPartNo || "",
                 boPartName: c.boPartName || "",
+                itemDescription: c.itemDescription || "",
+                showItemDesc: !!c.itemDescription,
+                boNumberMode: c.boNumberMode === "customerPartNumber" ? "customerPartNumber" : "auto",
+                boAutoMemo: null,
+
+                boProcessCode: BO_DEFAULT_CODE, // UI only
                 isChildPart: true,
               }))
             : [],
@@ -462,6 +336,12 @@ export default function CreateEnquiryModal({
             customerPartName: pm.customerPartName || "",
             modifiedBOPartNo: pm.modifiedBOPartNo || "",
             boPartName: pm.boPartName || "",
+            itemDescription: "",
+            showItemDesc: false,
+            boNumberMode: "auto",
+            boAutoMemo: null,
+
+            boProcessCode: BO_DEFAULT_CODE, // UI only
             isChildPart: false,
             collapsed: false,
             children: [],
@@ -478,13 +358,17 @@ export default function CreateEnquiryModal({
   const [form, setForm]                 = useState(getInitialForm);
   const [parts, setParts]               = useState(getInitialParts);
   const [partsError, setPartsError]     = useState("");
-  const [showBOPanel, setShowBOPanel]   = useState(false);
-  const [boTarget, setBoTarget]         = useState(null); // { parentId, childId }
   const [supplierDraft, setSupplierDraft] = useState({}); // { [partId]: "supplier name being typed" }
   const [supplierPoDraft, setSupplierPoDraft] = useState({}); // { [partId]: "PO number being typed" }
   const [supplierDateDraft, setSupplierDateDraft] = useState({}); // { [partId]: "date of issue being typed" }
   const [partSuppliers, setPartSuppliers] = useState({}); // { [partId]: [{ name, poNumber, dateOfIssue }] }
   const submitLockRef = useRef(false); // synchronous double-submit guard, see handleSubmit
+  // Draft auto-save (create flow only). draftReady flips true only AFTER a saved draft has been
+  // restored, so the first (still-empty) render can never overwrite what was saved.
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftInfo, setDraftInfo]   = useState({ restoredAt: null, savedAt: null });
+  const draftSnapRef  = useRef(null);   // latest form snapshot
+  const draftDirtyRef = useRef(false);  // typed but not yet written (debounce pending)
 
   // Release the lock once the parent reports the request has finished
   // (success or failure) so a legitimate next save isn't blocked forever.
@@ -505,8 +389,6 @@ export default function CreateEnquiryModal({
       setParts(initialParts);
       setPartsError("");
       setActiveTab("bo");
-      setShowBOPanel(false);
-      setBoTarget(null);
       setSupplierDraft({});
       setSupplierPoDraft({});
       setSupplierDateDraft({});
@@ -524,8 +406,66 @@ export default function CreateEnquiryModal({
         );
       });
       setPartSuppliers(hydrated);
+
+      // ── Restore an auto-saved draft (new enquiries only) ──
+      if (!editData) {
+        const d = loadEnquiryDraft();
+        if (d && !isDraftEmpty(d, EMPTY_FORM)) {
+          setForm({ ...EMPTY_FORM, ...d.form });
+          setParts(d.parts);
+          setPartSuppliers(d.partSuppliers || {});
+          setSupplierDraft(d.supplierDraft || {});
+          setSupplierPoDraft(d.supplierPoDraft || {});
+          setSupplierDateDraft(d.supplierDateDraft || {});
+          setActiveTab(d.activeTab === "po" ? "po" : "bo");
+          setDraftInfo({ restoredAt: d.savedAt, savedAt: d.savedAt });
+        } else {
+          setDraftInfo({ restoredAt: null, savedAt: null });
+        }
+        setDraftReady(true);
+      }
+    } else {
+      setDraftReady(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, editData]);
+
+  // ── Auto-save: debounced while typing + flushed immediately on refresh / tab close ──
+  useEffect(() => {
+    if (!isOpen || editData || !draftReady) return undefined;
+    const snap = { form, parts, partSuppliers, supplierDraft, supplierPoDraft, supplierDateDraft, activeTab };
+    draftSnapRef.current = snap;
+    draftDirtyRef.current = true;
+    const write = () => {
+      draftDirtyRef.current = false;
+      if (isDraftEmpty(snap, EMPTY_FORM)) { clearEnquiryDraft(); return null; }
+      return saveEnquiryDraft(snap);
+    };
+    const timer = setTimeout(() => {
+      const ok = write();
+      if (ok) setDraftInfo((prev) => ({ ...prev, savedAt: Date.now() }));
+    }, 500);
+    const flush = () => { clearTimeout(timer); write(); };
+    window.addEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [isOpen, editData, draftReady, form, parts, partSuppliers, supplierDraft, supplierPoDraft, supplierDateDraft, activeTab]);
+
+  // When the form is closed (Cancel / ✕), keep the draft but don't reopen it after a refresh.
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (wasOpenRef.current && !isOpen && !editData) {
+      // Closed within the debounce window? Save the last keystrokes first.
+      const snap = draftSnapRef.current;
+      if (draftDirtyRef.current && snap && !isDraftEmpty(snap, EMPTY_FORM)) saveEnquiryDraft(snap);
+      draftDirtyRef.current = false;
+      markEnquiryDraftClosed();
+    }
+    wasOpenRef.current = isOpen;
   }, [isOpen, editData]);
 
   if (!isOpen) return null;
@@ -534,6 +474,22 @@ export default function CreateEnquiryModal({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  /* ── Draft: discard the saved draft and start from a blank form ── */
+  const discardDraft = () => {
+    clearEnquiryDraft();
+    setForm({ ...EMPTY_FORM });
+    setParts(getInitialParts());
+    setPartSuppliers({});
+    setSupplierDraft({});
+    setSupplierPoDraft({});
+    setSupplierDateDraft({});
+    setPartsError("");
+    setActiveTab("bo");
+    setDraftInfo({ restoredAt: null, savedAt: null });
+    toast.info("Draft discarded");
+  };
+  const draftTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
   /* ── Parts Details: CRUD helpers ── */
   const addPart = () => setParts((prev) => [...prev, makeEmptyPart()]);
 
@@ -541,7 +497,17 @@ export default function CreateEnquiryModal({
     setParts((prev) => prev.filter((p) => p.id !== id));
 
   const updatePartField = (id, field, value) =>
-    setParts((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    setParts((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p, [field]: value };
+        // "Same as Customer Part Number": BO No follows every Customer Part No edit.
+        if (field === "customerPartNo" && p.boNumberMode === "customerPartNumber") {
+          next.modifiedBOPartNo = value;
+        }
+        return next;
+      })
+    );
 
   const togglePartCollapse = (id) =>
     setParts((prev) => prev.map((p) => (p.id === id ? { ...p, collapsed: !p.collapsed } : p)));
@@ -611,36 +577,73 @@ export default function CreateEnquiryModal({
     setParts((prev) =>
       prev.map((p) =>
         p.id === parentId
-          ? { ...p, children: (p.children || []).map((c) => (c.id === childId ? { ...c, [field]: value } : c)) }
+          ? {
+              ...p,
+              children: (p.children || []).map((c) => {
+                if (c.id !== childId) return c;
+                const next = { ...c, [field]: value };
+                if (field === "customerPartNo" && c.boNumberMode === "customerPartNumber") {
+                  next.modifiedBOPartNo = value;
+                }
+                return next;
+              }),
+            }
           : p
       )
     );
 
-  /* ── BO Part Number Builder — works against whichever part/child triggered it ── */
-  const openBOBuilder = (parentId, childId = null) => {
-    setBoTarget({ parentId, childId });
-    setShowBOPanel(true);
+  /* ── Generate the BO Part Number inline (parent part: childId = null) ── */
+  const findItem = (parentId, childId) => {
+    const parent = parts.find((p) => p.id === parentId);
+    return childId ? (parent?.children || []).find((c) => c.id === childId) : parent;
+  };
+  const generateBO = (parentId, childId = null) => {
+    const item = findItem(parentId, childId);
+    if (!item) return;
+    if (!(item.customerPartNo || "").trim()) { toast.error("Enter the Customer Part No first."); return; }
+    const value = buildBOPartNo(form.customerName, item.customerPartNo, item.boProcessCode || BO_DEFAULT_CODE);
+    if (childId) updateChildField(parentId, childId, "modifiedBOPartNo", value);
+    else updatePartField(parentId, "modifiedBOPartNo", value);
   };
 
-  const applyBOPartNo = (value) => {
-    if (!boTarget) return;
-    if (boTarget.childId) {
-      updateChildField(boTarget.parentId, boTarget.childId, "modifiedBOPartNo", value);
+  /* ── BO Number mode switch (parent part: childId = null)
+     auto → customerPartNumber : BO No := Customer Part No (previous auto value is remembered)
+     customerPartNumber → auto : restore the remembered auto value if still valid for the current
+                                 Customer Part No; otherwise generate it again with the same formula. */
+  const changeBONumberMode = (parentId, childId, mode) => {
+    const item = findItem(parentId, childId);
+    if (!item || item.boNumberMode === mode) return;
+
+    let patch;
+    if (mode === "customerPartNumber") {
+      patch = {
+        boNumberMode: mode,
+        boAutoMemo: item.modifiedBOPartNo
+          ? { value: item.modifiedBOPartNo, src: item.customerPartNo }
+          : item.boAutoMemo || null,
+        modifiedBOPartNo: item.customerPartNo,
+      };
     } else {
-      updatePartField(boTarget.parentId, "modifiedBOPartNo", value);
+      const memo = item.boAutoMemo;
+      let restore = "";
+      if (memo && memo.src === item.customerPartNo) restore = memo.value;
+      else if ((item.customerPartNo || "").trim()) restore = buildBOPartNo(form.customerName, item.customerPartNo, item.boProcessCode || BO_DEFAULT_CODE);
+      patch = { boNumberMode: mode, modifiedBOPartNo: restore };
+    }
+
+    if (childId) {
+      setParts((prev) =>
+        prev.map((p) =>
+          p.id === parentId
+            ? { ...p, children: (p.children || []).map((c) => (c.id === childId ? { ...c, ...patch } : c)) }
+            : p
+        )
+      );
+    } else {
+      setParts((prev) => prev.map((p) => (p.id === parentId ? { ...p, ...patch } : p)));
     }
   };
 
-  const getBoTargetCustomerPartNo = () => {
-    if (!boTarget) return "";
-    const parent = parts.find((p) => p.id === boTarget.parentId);
-    if (!parent) return "";
-    if (boTarget.childId) {
-      const child = (parent.children || []).find((c) => c.id === boTarget.childId);
-      return child ? child.customerPartNo : "";
-    }
-    return parent.customerPartNo;
-  };
 
   /* ── Validation: parent part no mandatory, child part no mandatory if added, no duplicates ── */
   const validateParts = () => {
@@ -674,11 +677,19 @@ export default function CreateEnquiryModal({
     if (submitLockRef.current || isSubmitting) return;
     submitLockRef.current = true;
 
+    // Editing a saved enquiry: its (now editable) Enquiry Number can't be blank.
+    if (isEdit && !(form.enquiryNumber || "").trim()) {
+      submitLockRef.current = false;
+      toast.error("Enquiry Number cannot be empty.");
+      setActiveTab("bo");
+      return;
+    }
+
     const validationMessage = validateParts();
     if (validationMessage) {
       submitLockRef.current = false;
       setPartsError(validationMessage);
-      setActiveTab("parts");
+      setActiveTab("bo"); // Enquiry & Part Details is now a single tab
       return;
     }
     setPartsError("");
@@ -701,10 +712,10 @@ export default function CreateEnquiryModal({
     });
 
     // Clean UI-only fields (id/collapsed) before sending to the API.
-    const cleanParts = parts.map(({ id, collapsed, children, childDecision, ...rest }) => ({
+    const cleanParts = parts.map(({ id, collapsed, children, childDecision, showItemDesc, boAutoMemo, boProcessCode, ...rest }) => ({
       ...rest,
       isChildPart: false,
-      children: (children || []).map(({ id: childId, ...childRest }) => ({
+      children: (children || []).map(({ id: childId, showItemDesc: _s, boAutoMemo: _m, boProcessCode: _c, ...childRest }) => ({
         ...childRest,
         isChildPart: true,
       })),
@@ -748,319 +759,20 @@ poDetails: (() => {
         suppliers: effectivePartSuppliers[p.id] || [],
       })),
     };
-    if (isEdit) payload.enquiryNumber = form.enquiryNumber;
+    if (isEdit) payload.enquiryNumber = (form.enquiryNumber || "").trim();
+    draftDirtyRef.current = false; // submitted: don't re-save this content as a draft when the form closes
     onSubmit(payload);
   };
 
   const tabs = [
-    { key: "bo", label: "BO / Enquiry Details", Icon: IconBO },
-    { key: "parts", label: `Parts Details${parts.length ? ` (${parts.length})` : ""}`, Icon: IconPart },
-    { key: "po", label: "PO Details", Icon: IconPO },
+    { key: "bo", label: "Enquiry & Part Details", Icon: IconBO },
+    { key: "po", label: "Supplier PO Details", Icon: IconPO },
   ];
 
   return (
     <>
-      {/* ── Scoped styles for the BO Builder Drawer ── */}
+      {/* ── Scoped styles for the Enquiry modal ── */}
       <style>{`
-        /* Backdrop */
-        .bo-drawer-backdrop {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,0.25);
-          opacity: 0;
-          pointer-events: none;
-          transition: opacity 0.28s ease;
-          z-index: 1100;
-        }
-        .bo-drawer-backdrop.open {
-          opacity: 1;
-          pointer-events: auto;
-        }
-
-        /* Drawer panel */
-        .bo-drawer {
-          position: fixed;
-          top: 0;
-          right: 0;
-          height: 100vh;
-          width: 420px;
-          max-width: 95vw;
-          background: #ffffff;
-          box-shadow: -6px 0 32px rgba(0,0,0,0.15);
-          display: flex;
-          flex-direction: column;
-          z-index: 1200;
-          transform: translateX(100%);
-          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          border-left: 1px solid #e5e7eb;
-        }
-        .bo-drawer.open {
-          transform: translateX(0);
-        }
-
-        /* Header */
-        .bo-drawer-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          padding: 16px 18px 14px;
-          border-bottom: 1px solid #f0f0f0;
-          background: linear-gradient(135deg, #f8f5ff 0%, #fdf4ff 100%);
-          flex-shrink: 0;
-        }
-        .bo-drawer-title {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-        }
-        .bo-drawer-title-icon {
-          width: 34px;
-          height: 34px;
-          border-radius: 10px;
-          background: linear-gradient(135deg, #7c3aed, #a855f7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #fff;
-          flex-shrink: 0;
-        }
-        .bo-drawer-title h3 {
-          margin: 0 0 2px;
-          font-size: 14.5px;
-          font-weight: 700;
-          color: #1e1b4b;
-        }
-        .bo-drawer-title p {
-          margin: 0;
-          font-size: 11px;
-          color: #6b7280;
-        }
-        .bo-drawer-close {
-          border: none;
-          background: #f3f4f6;
-          border-radius: 8px;
-          width: 28px;
-          height: 28px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          color: #6b7280;
-          transition: background 0.15s;
-          flex-shrink: 0;
-        }
-        .bo-drawer-close:hover { background: #e5e7eb; color: #111; }
-
-        /* Body */
-        .bo-drawer-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 14px 18px;
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-        .bo-drawer-body::-webkit-scrollbar { width: 5px; }
-        .bo-drawer-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
-
-        /* Section */
-        .bo-drawer-section {
-          background: #fafafa;
-          border: 1px solid #f0f0f0;
-          border-radius: 12px;
-          padding: 12px 14px;
-        }
-        .bo-drawer-section-label {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          font-size: 10.5px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: #6b7280;
-          margin-bottom: 10px;
-        }
-        .bo-ds-dot {
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          display: inline-block;
-        }
-        .bo-ds-dot.fetch   { background: #3b82f6; }
-        .bo-ds-dot.config  { background: #8b5cf6; }
-        .bo-ds-dot.preview { background: #10b981; }
-        .bo-ds-dot.suggest { background: #f59e0b; }
-
-        /* Auto-fetch grid */
-        .bo-fetch-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 7px;
-        }
-        .bo-fetch-item {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          background: #fff;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          padding: 7px 9px;
-        }
-        .bo-fetch-key {
-          font-size: 9.5px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          color: #9ca3af;
-        }
-        .bo-fetch-val {
-          font-size: 12.5px;
-          font-weight: 600;
-          color: #374151;
-        }
-        .bo-fetch-val em { font-style: italic; font-weight: 400; color: #9ca3af; }
-        .bo-fetch-val.highlight {
-          color: #7c3aed;
-          font-size: 13.5px;
-        }
-
-        /* Config grid */
-        .bo-config-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 9px;
-        }
-        .bo-config-field {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .bo-config-field label {
-          font-size: 10.5px;
-          font-weight: 600;
-          color: #374151;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-        .bo-config-field input,
-        .bo-config-field select {
-          border: 1.5px solid #e5e7eb;
-          border-radius: 7px;
-          padding: 6px 9px;
-          font-size: 12.5px;
-          color: #111;
-          background: #fff;
-          outline: none;
-          transition: border-color 0.15s;
-          width: 100%;
-          box-sizing: border-box;
-        }
-        .bo-config-field input:focus,
-        .bo-config-field select:focus {
-          border-color: #7c3aed;
-          box-shadow: 0 0 0 3px rgba(124,58,237,0.1);
-        }
-        .bo-custom-input {
-          margin-top: 4px !important;
-        }
-
-        /* Live preview */
-        .bo-live-preview {
-          background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
-          border: 1.5px solid #a7f3d0;
-          border-radius: 10px;
-          padding: 12px 14px;
-          text-align: center;
-        }
-        .bo-preview-label {
-          display: block;
-          font-size: 10px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: #059669;
-          margin-bottom: 7px;
-        }
-        .bo-preview-value {
-          font-size: 20px;
-          font-weight: 800;
-          color: #065f46;
-          letter-spacing: 0.06em;
-          margin-bottom: 8px;
-          min-height: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .bo-preview-empty {
-          font-size: 12.5px;
-          font-weight: 400;
-          color: #9ca3af;
-          font-style: italic;
-        }
-        .bo-preview-breakdown {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 4px;
-          flex-wrap: wrap;
-        }
-        .bp-chip {
-          padding: 2px 9px;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-        }
-        .bp-chip.cust   { background: #fef3c7; color: #92400e; }
-        .bp-chip.prefix { background: #ede9fe; color: #5b21b6; }
-        .bp-chip.digits { background: #dbeafe; color: #1d4ed8; }
-        .bp-chip.code   { background: #fce7f3; color: #9d174d; }
-        .bp-sep { color: #9ca3af; font-size: 11px; font-weight: 600; }
-
-        /* Footer */
-        .bo-drawer-footer {
-          padding: 12px 18px;
-          border-top: 1px solid #f0f0f0;
-          display: flex;
-          gap: 10px;
-          background: #fff;
-          flex-shrink: 0;
-        }
-        .bo-drawer-cancel {
-          flex: 1;
-          padding: 9px;
-          border: 1.5px solid #e5e7eb;
-          border-radius: 9px;
-          background: #fff;
-          color: #374151;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .bo-drawer-cancel:hover { background: #f9fafb; border-color: #d1d5db; }
-        .bo-drawer-apply {
-          flex: 2;
-          padding: 9px 16px;
-          border: none;
-          border-radius: 9px;
-          background: linear-gradient(135deg, #7c3aed, #a855f7);
-          color: #fff;
-          font-size: 13px;
-          font-weight: 700;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          transition: opacity 0.15s, transform 0.12s;
-          box-shadow: 0 3px 10px rgba(124,58,237,0.3);
-        }
-        .bo-drawer-apply:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
-        .bo-drawer-apply:disabled { opacity: 0.45; cursor: not-allowed; }
-
         /* BO field trigger button inside form */
         .bo-field-trigger-wrap {
           display: flex;
@@ -1614,17 +1326,290 @@ poDetails: (() => {
           box-shadow: 0 2px 8px rgba(16,185,129,0.25);
         }
         .supplier-add-btn:hover { opacity: 0.92; transform: translateY(-1px); }
+
+        /* ── Inline BO generator: Process Code + Generate ── */
+        .bo-gen-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .bo-code-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280; white-space: nowrap; }
+        .bo-code-select {
+          padding: 6px 28px 6px 10px; border: 1.5px solid #ddd6fe; border-radius: 8px; background: #fff;
+          font-size: 12.5px; font-weight: 700; color: #6d28d9; cursor: pointer; width: auto; min-width: 74px;
+        }
+        .bo-code-select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15); }
+        .bo-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .enq-form .bo-gen-inline { flex: 0 0 auto; gap: 8px; order: 1; flex-wrap: nowrap; }
+        .enq-form .bo-filled-display { order: 2; }
+        .enq-form .bo-code-select { padding: 5px 26px 5px 9px; }
+
+        /* ── Draft auto-save ── */
+        .draft-banner {
+          display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+          margin-bottom: 10px; padding: 8px 12px; border-radius: 10px;
+          background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; font-size: 12.5px;
+        }
+        .draft-banner-text { flex: 1 1 260px; }
+        .draft-banner-btn {
+          border: 1px solid #6ee7b7; background: #fff; color: #047857; border-radius: 8px;
+          padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+        }
+        .draft-banner-btn:hover { background: #d1fae5; }
+        .draft-banner-x { border: none; background: none; color: #059669; cursor: pointer; font-size: 13px; padding: 2px 4px; }
+        .draft-status { margin-right: auto; align-self: center; font-size: 12px; font-weight: 600; color: #059669; }
+
+        /* ── BO Number mode toggle ── */
+        .bo-mode-toggle {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px 12px;
+          font-size: 12px;
+        }
+        .bo-mode-toggle-label {
+          font-size: 10.5px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: #6b7280;
+        }
+        .bo-mode-toggle label {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          cursor: pointer;
+          font-weight: 600;
+          color: #4b5563;
+        }
+        .bo-mode-toggle label.selected { color: #6d28d9; }
+        .bo-mode-toggle input[type="radio"] { accent-color: #7c3aed; margin: 0; width: auto; }
+        .bo-filled-display.bo-linked { background: #f0fdf4; border-color: #86efac; color: #166534; }
+        .bo-filled-display.bo-linked em { font-weight: 400; color: #9ca3af; }
+        .bo-linked-tag { font-size: 10px; font-weight: 600; letter-spacing: 0; color: #15803d; }
+
+        /* ── Part-specific Item Description ── */
+        .item-desc-hint { display: block; margin-top: 5px; font-size: 11px; color: #6b7280; }
+        .item-desc-add-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin-top: 4px;
+          padding: 6px 11px;
+          border: 1.5px dashed #a78bfa;
+          border-radius: 8px;
+          background: #faf5ff;
+          color: #7c3aed;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .item-desc-add-btn:hover { background: #f0e6ff; border-color: #7c3aed; }
+        .item-desc-box { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+        .item-desc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .item-desc-remove-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          border: none;
+          background: none;
+          color: #9ca3af;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .item-desc-remove-btn:hover { color: #ef4444; }
+
+        /* ═════════════════════════════════════════════════════════════
+           COMPACT FORM LAYOUT — scoped to .enq-form (Create/Edit Enquiry)
+           Fields flow side-by-side so the whole form fits on screen.
+        ═════════════════════════════════════════════════════════════ */
+        .modal-container.enq-form {
+          width: min(1240px, 97vw);
+          max-height: 97vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border-radius: 14px;
+        }
+        .enq-form .modal-header { padding: 14px 24px 8px; padding-right: 56px; flex-shrink: 0; }
+        .enq-form .modal-header h2 { font-size: 20px; margin: 0; }
+        .enq-form .modal-header p { display: none; }
+        .enq-form .modal-close-btn { top: 12px; right: 16px; width: 28px; height: 28px; }
+        .enq-form .modal-divider { margin: 0 24px; }
+        .enq-form .modal-tabs { margin: 10px 24px 0; padding: 3px; flex-shrink: 0; }
+        .enq-form .modal-tab { padding: 6px 14px; font-size: 13px; }
+        .enq-form .modal-body { padding: 10px 24px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+        .enq-form .modal-footer { padding: 10px 24px 14px; flex-shrink: 0; background: #fff; }
+        .enq-form .modal-cancel-btn,
+        .enq-form .modal-submit-btn { padding: 8px 22px; font-size: 13.5px; }
+
+        /* Section cards */
+        .enq-form .tab-section { padding: 12px 14px; border-radius: 12px; margin-bottom: 10px; }
+        .enq-form .tab-section:last-child { margin-bottom: 0; }
+        .enq-form .tab-section-blob { display: none; }
+        .enq-form .tab-section-title { font-size: 14px; margin-bottom: 8px; gap: 8px; }
+        .enq-form .tab-section-title .section-icon { width: 26px; height: 26px; border-radius: 8px; }
+        .enq-form .tab-section-title .section-icon svg { width: 14px; height: 14px; }
+
+        /* Field cards become tight label-over-input cells */
+        .enq-form .tab-fields-grid { gap: 8px; margin-bottom: 0; }
+        .enq-form .tab-field-card { padding: 7px 10px; gap: 3px; border-radius: 8px; min-width: 0; }
+        .enq-form .tab-field-card label { font-size: 11.5px; }
+        .enq-form .tab-field-card input:not([type="radio"]) { padding: 6px 9px; font-size: 13px; border-radius: 7px; box-sizing: border-box; width: 100%; min-width: 0; }
+
+        /* Row 1: Enquiry No | Customer | RFQ date | Item description */
+        .enq-form .tab-fields-grid.enq-row-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+        .enq-form .enquiry-gen-section { margin: 0; padding: 7px 10px; border-radius: 8px; background: #fff; }
+        .enq-form .enquiry-gen-title { font-size: 11.5px; margin-bottom: 4px; }
+        .enq-form .enquiry-gen-options { margin-bottom: 6px; }
+        .enq-form .enquiry-gen-info { display: none; } /* radios already say "Auto Generate" */
+        .enq-form .enquiry-gen-input { margin-top: 6px; }
+        .enq-form .enquiry-gen-input input { padding: 5px 9px; font-size: 12.5px; box-sizing: border-box; width: 100%; }
+
+        /* Parts: header + ONE row per part.
+           The two stacked field grids inside a card are flattened (display: contents)
+           so their cells flow into a single 5-column row:
+           Customer Part No | Part Name | BO Number | BO Part Name | Item Description */
+        .enq-form .parts-title-row { margin-bottom: 8px; }
+        .enq-form .add-part-btn { padding: 5px 11px; font-size: 11.5px; }
+        .enq-form .add-part-btn-bottom { width: auto; margin: 8px 0 0; padding: 6px 14px; font-size: 12px; }
+        .enq-form .parts-error-banner { padding: 6px 10px; margin-bottom: 8px; font-size: 11.5px; }
+        .enq-form .parts-list { gap: 8px; }
+        .enq-form .part-card { border-radius: 10px; }
+        .enq-form .part-card-header { padding: 5px 10px; gap: 8px; }
+        .enq-form .part-collapse-btn { width: 22px; height: 22px; }
+        .enq-form .part-badge { font-size: 10.5px; padding: 3px 8px; }
+        .enq-form .remove-part-btn,
+        .enq-form .remove-child-btn { padding: 3px 8px; font-size: 10.5px; }
+        .enq-form .part-card-body,
+        .enq-form .child-part-content {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+          align-items: start;
+        }
+        .enq-form .part-card-body { padding: 8px 10px; }
+        .enq-form .part-card-body > .tab-fields-grid,
+        .enq-form .child-part-content > .tab-fields-grid { display: contents; }
+        /* BO Number cell gets more room (mode toggle + value + button) */
+        .enq-form .part-card-body > .tab-fields-grid:nth-of-type(1),
+        .enq-form .part-card-body > .tab-fields-grid:nth-of-type(2) { order: 0; }
+        .enq-form .part-card-body > .child-parts-wrap,
+        .enq-form .part-card-body > .child-confirm-box,
+        .enq-form .part-card-body > .child-decision-skipped { grid-column: 1 / -1; order: 10; }
+        .enq-form .child-part-content > .child-part-header { grid-column: 1 / -1; }
+
+        /* BO Number: full-width strip → [label] [Auto | Same as CPN] [value] [Generate] */
+        .enq-form .bo-number-cell {
+          grid-column: 1 / -1;
+          order: 5;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px 18px;
+          padding: 8px 12px;
+          background: #faf8ff;
+          border-color: #e9e0ff;
+        }
+        .enq-form .bo-number-cell > .part-label { flex: 0 0 auto; margin: 0; font-size: 12px; }
+        .enq-form .bo-field-trigger-wrap {
+          flex: 1 1 460px;
+          min-width: 0;
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px 12px;
+        }
+        .enq-form .bo-filled-display { flex: 1 1 200px; min-width: 0; margin: 0; padding: 6px 10px; font-size: 12.5px; border-radius: 8px; }
+        .enq-form .bo-linked-tag { display: none; }
+        .enq-form .bo-generate-btn { flex: 0 0 auto; width: auto; margin: 0; padding: 6px 14px; font-size: 12px; gap: 7px; white-space: nowrap; }
+        .enq-form .bo-generate-btn-icon { width: 18px; height: 18px; }
+
+        /* Segmented toggle (replaces loose radios) */
+        .enq-form .bo-mode-toggle,
+        .enq-form .enquiry-gen-options {
+          display: inline-flex;
+          flex: 0 0 auto;
+          align-items: stretch;
+          gap: 2px;
+          padding: 2px;
+          border-radius: 9px;
+          background: #ede9fe;
+          margin: 0;
+        }
+        .enq-form .enquiry-gen-options { display: flex; background: #e0ecff; }
+        .enq-form .bo-mode-toggle-label { display: none; }
+        .enq-form .bo-mode-toggle label,
+        .enq-form .enquiry-gen-options label {
+          position: relative;
+          flex: 1 1 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 5px 12px;
+          border-radius: 7px;
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 1.2;
+          color: #6b7280;
+          white-space: nowrap;
+          cursor: pointer;
+          transition: background 0.15s, color 0.15s;
+        }
+        .enq-form .bo-mode-toggle label.selected { background: #fff; color: #6d28d9; box-shadow: 0 1px 3px rgba(76, 29, 149, 0.18); }
+        .enq-form .enquiry-gen-options label.selected { background: #fff; color: #2563eb; box-shadow: 0 1px 3px rgba(37, 99, 235, 0.18); }
+        .enq-form .bo-mode-toggle input[type="radio"],
+        .enq-form .enquiry-gen-options input[type="radio"] {
+          position: absolute; opacity: 0; width: 0; height: 0; margin: 0; padding: 0; pointer-events: none;
+        }
+        .enq-form .bo-mode-toggle label:focus-within,
+        .enq-form .enquiry-gen-options label:focus-within { outline: 2px solid #a78bfa; outline-offset: 1px; }
+
+        /* Item description cell */
+        .enq-form .item-desc-cell { margin: 0; background: #fff; border: 1px solid rgba(0,0,0,0.06); border-radius: 8px; padding: 7px 10px; gap: 3px; display: flex; flex-direction: column; min-width: 0; }
+        .enq-form .item-desc-cell .part-label { font-size: 11.5px; font-weight: 600; color: #7c3aed; margin: 0; white-space: nowrap; }
+        .enq-form .item-desc-head { min-width: 0; }
+        .enq-form .item-desc-remove-btn { flex-shrink: 0; padding: 2px; }
+        .enq-form .item-desc-add-btn { margin: 0; justify-content: center; padding: 0 10px; font-size: 11.5px; width: 100%; box-sizing: border-box; height: 31px; }
+        .enq-form .item-desc-box input { padding: 6px 9px; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 7px; width: 100%; box-sizing: border-box; }
+
+        /* Child parts */
+        .enq-form .child-parts-wrap { margin-top: 2px; padding-left: 14px; gap: 6px; }
+        .enq-form .child-part-content { padding: 6px 8px; border-radius: 8px; }
+        .enq-form .child-part-header { margin: 0; }
+        .enq-form .child-part-connector { height: 16px; }
+        .enq-form .add-child-part-btn { padding: 5px 10px; font-size: 11.5px; }
+        .enq-form .child-confirm-box { margin-top: 0; padding: 6px 10px; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+        .enq-form .child-confirm-yes-btn,
+        .enq-form .child-confirm-no-btn { padding: 4px 12px; }
+        .enq-form .child-decision-skipped { margin-top: 0; padding: 5px 10px; }
+
+        /* Supplier PO tab */
+        .enq-form .supplier-assign-section { padding: 10px 12px; }
+        .enq-form .supplier-part-list { gap: 8px; }
+        .enq-form .supplier-part-row { padding: 8px 10px; gap: 6px; }
+
+        /* Narrower screens: fewer columns, still no wasted space */
+        @media (max-width: 1100px) {
+          .enq-form .tab-fields-grid.enq-row-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .enq-form .part-card-body,
+          .enq-form .child-part-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 640px) {
+          .enq-form .tab-fields-grid.enq-row-4,
+          .enq-form .part-card-body,
+          .enq-form .child-part-content { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-container enq-form" onClick={(e) => e.stopPropagation()}>
           {/* Header */}
           <div className="modal-header">
             <h2>{isEdit ? "Edit Enquiry" : "Create New Enquiry"}</h2>
             <p>
               {isEdit
                 ? "Update the enquiry details below."
-                : "Fill in the details below to create a new enquiry record. You can add information across all three sections."}
+                : "Fill in the details below to create a new enquiry record. You can add information across both sections."}
             </p>
             <button className="modal-close-btn" onClick={onClose}>✕</button>
           </div>
@@ -1647,6 +1632,15 @@ poDetails: (() => {
 
           {/* Tab Content */}
           <div className="modal-body">
+            {!isEdit && draftInfo.restoredAt && (
+              <div className="draft-banner" role="status">
+                <span className="draft-banner-text">
+                  <strong>Draft restored</strong> — your earlier entries (saved at {draftTime(draftInfo.restoredAt)}) are back. Changes are saved automatically.
+                </span>
+                <button type="button" className="draft-banner-btn" onClick={discardDraft}>Discard draft &amp; start fresh</button>
+                <button type="button" className="draft-banner-x" aria-label="Dismiss" onClick={() => setDraftInfo((p) => ({ ...p, restoredAt: null }))}>✕</button>
+              </div>
+            )}
             {/* ─── BO / Enquiry & Part Mapping ─── */}
             {activeTab === "bo" && (
               <>
@@ -1656,7 +1650,21 @@ poDetails: (() => {
                     <span className="section-icon bo"><IconBO /></span>
                     BO / Enquiry Details
                   </div>
-                  <div className="tab-fields-grid">
+                  {/* One compact row of fields. Create: Customer | RFQ | Item Desc | Enquiry No. generation.
+                      Edit: Enquiry Number (now editable) | Customer | RFQ | Item Desc. */}
+                  <div className="tab-fields-grid enq-row-4">
+                    {/* Saved enquiries only: the generated number may be corrected. Create flow is unchanged. */}
+                    {isEdit && (
+                      <div className="tab-field-card">
+                        <label className="bo-label required">Enquiry Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. ENQ-26-015"
+                          value={form.enquiryNumber}
+                          onChange={(e) => handleChange("enquiryNumber", e.target.value)}
+                        />
+                      </div>
+                    )}
                     <div className="tab-field-card">
                       <label className="bo-label required">Customer Name</label>
                       <input type="text" placeholder="Enter customer name" value={form.customerName} onChange={(e) => handleChange("customerName", e.target.value)} />
@@ -1665,51 +1673,49 @@ poDetails: (() => {
                       <label className="bo-label required">Customer RFQ Date</label>
                       <input type="date" placeholder="dd-mm-yyyy" value={form.customerRFQDate} onChange={(e) => handleChange("customerRFQDate", e.target.value)} />
                     </div>
-                  </div>
-                  <div className="tab-fields-grid single">
                     <div className="tab-field-card">
                       <label className="bo-label">Item Description</label>
-                      <input type="text" placeholder="Enter item description" value={form.itemDescription} onChange={(e) => handleChange("itemDescription", e.target.value)} />
+                      <input type="text" placeholder="Common description for all parts" title="Common description for all parts. A part can have its own via “+ Add Item Description” in Part Details." value={form.itemDescription} onChange={(e) => handleChange("itemDescription", e.target.value)} />
                     </div>
-                  </div>
 
-                  {/* Enquiry Number Generation */}
-                  {!isEdit && (
-                    <div className="enquiry-gen-section">
-                      <div className="enquiry-gen-title">
-                        <IconSparkle /> Enquiry No. Generation
-                      </div>
-                      <div className="enquiry-gen-options">
-                        <label className={form.enquiryNumberMode === "auto" ? "selected" : ""}>
-                          <input type="radio" name="enquiryMode" checked={form.enquiryNumberMode === "auto"} onChange={() => handleChange("enquiryNumberMode", "auto")} />
-                          Auto Generate
-                        </label>
-                        <label className={form.enquiryNumberMode === "manual" ? "selected" : ""}>
-                          <input type="radio" name="enquiryMode" checked={form.enquiryNumberMode === "manual"} onChange={() => handleChange("enquiryNumberMode", "manual")} />
-                          Manual Entry
-                        </label>
-                      </div>
-                      {form.enquiryNumberMode === "auto" ? (
-                        <div className="enquiry-gen-info">
-                          <span className="gen-icon"><IconSparkle /></span>
-                          <span>
-                            Enquiry No. will be auto-generated<br />
-                            <span className="gen-example">Example: ENQ-2024-001, ENQ-2024-002, etc.</span>
-                          </span>
+                    {/* Enquiry Number Generation (create only — logic unchanged) */}
+                    {!isEdit && (
+                      <div className="enquiry-gen-section">
+                        <div className="enquiry-gen-title">
+                          <IconSparkle /> Enquiry No. Generation
                         </div>
-                      ) : (
-                        <div className="enquiry-gen-input">
-                          <input type="text" placeholder="Enter enquiry number (e.g. ENQ-2024-001)" value={form.enquiryNumber} onChange={(e) => handleChange("enquiryNumber", e.target.value)} />
+                        <div className="enquiry-gen-options">
+                          <label className={form.enquiryNumberMode === "auto" ? "selected" : ""}>
+                            <input type="radio" name="enquiryMode" checked={form.enquiryNumberMode === "auto"} onChange={() => handleChange("enquiryNumberMode", "auto")} />
+                            Auto Generate
+                          </label>
+                          <label className={form.enquiryNumberMode === "manual" ? "selected" : ""}>
+                            <input type="radio" name="enquiryMode" checked={form.enquiryNumberMode === "manual"} onChange={() => handleChange("enquiryNumberMode", "manual")} />
+                            Manual Entry
+                          </label>
                         </div>
-                      )}
-                    </div>
-                  )}
+                        {form.enquiryNumberMode === "auto" ? (
+                          <div className="enquiry-gen-info">
+                            <span className="gen-icon"><IconSparkle /></span>
+                            <span>
+                              Enquiry No. will be auto-generated<br />
+                              <span className="gen-example">Example: ENQ-2024-001, ENQ-2024-002, etc.</span>
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="enquiry-gen-input">
+                            <input type="text" placeholder="Enter enquiry number (e.g. ENQ-2024-001)" value={form.enquiryNumber} onChange={(e) => handleChange("enquiryNumber", e.target.value)} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             )}
 
             {/* ─── Parts Details (multiple parent + child parts) ─── */}
-            {activeTab === "parts" && (
+            {activeTab === "bo" && (
               <div className="tab-section part-section">
                 <div className="tab-section-blob part-blob" />
                 <div className="tab-section-title parts-title-row">
@@ -1787,9 +1793,21 @@ poDetails: (() => {
                               </div>
                             </div>
                             <div className="tab-fields-grid">
-                              <div className="tab-field-card">
+                              <div className="tab-field-card bo-number-cell">
                                 <label className="part-label">Modified BO Part No</label>
                                 <div className="bo-field-trigger-wrap">
+                                  <BONumberModeToggle
+                                    name={`boMode_${part.id}`}
+                                    mode={part.boNumberMode}
+                                    onChange={(m) => changeBONumberMode(part.id, null, m)}
+                                  />
+                                  {part.boNumberMode === "customerPartNumber" ? (
+                                    <div className="bo-filled-display bo-linked">
+                                      <span>{part.modifiedBOPartNo || <em>Enter Customer Part No</em>}</span>
+                                      <span className="bo-linked-tag">= Customer Part No</span>
+                                    </div>
+                                  ) : (
+                                  <>
                                   {part.modifiedBOPartNo ? (
                                     <div className="bo-filled-display">
                                       <span>{part.modifiedBOPartNo}</span>
@@ -1802,14 +1820,15 @@ poDetails: (() => {
                                       </button>
                                     </div>
                                   ) : null}
-                                  <button
-                                    type="button"
-                                    className="bo-generate-btn"
-                                    onClick={() => openBOBuilder(part.id)}
-                                  >
-                                    <span className="bo-generate-btn-icon"><IconWand /></span>
-                                    {part.modifiedBOPartNo ? "Rebuild BO Part Number" : "Generate BO Part Number"}
-                                  </button>
+                                  <BOGenerateControl
+                                    code={part.boProcessCode}
+                                    hasValue={!!part.modifiedBOPartNo}
+                                    canGenerate={!!(part.customerPartNo || "").trim()}
+                                    onCodeChange={(c) => updatePartField(part.id, "boProcessCode", c)}
+                                    onGenerate={() => generateBO(part.id, null)}
+                                  />
+                                  </>
+                                  )}
                                 </div>
                               </div>
                               <div className="tab-field-card">
@@ -1822,6 +1841,15 @@ poDetails: (() => {
                                 />
                               </div>
                             </div>
+
+                            {/* ── Part-specific Item Description (optional) ── */}
+                            <PartItemDescription
+                              shown={part.showItemDesc}
+                              value={part.itemDescription}
+                              onShow={() => updatePartField(part.id, "showItemDesc", true)}
+                              onChange={(v) => updatePartField(part.id, "itemDescription", v)}
+                              onRemove={() => { updatePartField(part.id, "itemDescription", ""); updatePartField(part.id, "showItemDesc", false); }}
+                            />
 
                             {/* ── Child Parts — gated behind a Yes/No confirmation ── */}
                             {kids.length > 0 || part.childDecision === "yes" ? (
@@ -1862,9 +1890,21 @@ poDetails: (() => {
                                       </div>
                                     </div>
                                     <div className="tab-fields-grid child-fields-grid">
-                                      <div className="tab-field-card">
+                                      <div className="tab-field-card bo-number-cell">
                                         <label className="part-label">Modified BO Part No</label>
                                         <div className="bo-field-trigger-wrap">
+                                          <BONumberModeToggle
+                                            name={`boMode_${child.id}`}
+                                            mode={child.boNumberMode}
+                                            onChange={(m) => changeBONumberMode(part.id, child.id, m)}
+                                          />
+                                          {child.boNumberMode === "customerPartNumber" ? (
+                                            <div className="bo-filled-display bo-linked">
+                                              <span>{child.modifiedBOPartNo || <em>Enter Customer Part No</em>}</span>
+                                              <span className="bo-linked-tag">= Customer Part No</span>
+                                            </div>
+                                          ) : (
+                                          <>
                                           {child.modifiedBOPartNo ? (
                                             <div className="bo-filled-display">
                                               <span>{child.modifiedBOPartNo}</span>
@@ -1877,14 +1917,15 @@ poDetails: (() => {
                                               </button>
                                             </div>
                                           ) : null}
-                                          <button
-                                            type="button"
-                                            className="bo-generate-btn"
-                                            onClick={() => openBOBuilder(part.id, child.id)}
-                                          >
-                                            <span className="bo-generate-btn-icon"><IconWand /></span>
-                                            {child.modifiedBOPartNo ? "Rebuild BO Part Number" : "Generate BO Part Number"}
-                                          </button>
+                                          <BOGenerateControl
+                                    code={child.boProcessCode}
+                                    hasValue={!!child.modifiedBOPartNo}
+                                    canGenerate={!!(child.customerPartNo || "").trim()}
+                                    onCodeChange={(c) => updateChildField(part.id, child.id, "boProcessCode", c)}
+                                    onGenerate={() => generateBO(part.id, child.id)}
+                                  />
+                                          </>
+                                          )}
                                         </div>
                                       </div>
                                       <div className="tab-field-card">
@@ -1897,6 +1938,13 @@ poDetails: (() => {
                                         />
                                       </div>
                                     </div>
+                                    <PartItemDescription
+                                      shown={child.showItemDesc}
+                                      value={child.itemDescription}
+                                      onShow={() => updateChildField(part.id, child.id, "showItemDesc", true)}
+                                      onChange={(v) => updateChildField(part.id, child.id, "itemDescription", v)}
+                                      onRemove={() => { updateChildField(part.id, child.id, "itemDescription", ""); updateChildField(part.id, child.id, "showItemDesc", false); }}
+                                    />
                                   </div>
                                 </div>
                               ))}
@@ -2095,6 +2143,11 @@ poDetails: (() => {
 
           {/* Footer */}
           <div className="modal-footer">
+            {!isEdit && draftInfo.savedAt && (
+              <span className="draft-status" title="Everything you type is saved in this browser until you create the enquiry or discard the draft.">
+                ✓ Draft auto-saved · {draftTime(draftInfo.savedAt)}
+              </span>
+            )}
             <button className="modal-cancel-btn" onClick={onClose}>Cancel</button>
             <button className="modal-submit-btn" onClick={handleSubmit} disabled={isSubmitting}>
               <IconSparkle /> {isEdit ? "Update Enquiry" : "Create Enquiry"}
@@ -2102,17 +2155,6 @@ poDetails: (() => {
           </div>
         </div>
       </div>
-
-      {/* ── BO Part Number Builder Drawer ── */}
-      <BOBuilderDrawer
-        isOpen={showBOPanel}
-        onClose={() => setShowBOPanel(false)}
-        onApply={(value) => applyBOPartNo(value)}
-        formData={{
-          customerName:   form.customerName,
-          customerPartNo: getBoTargetCustomerPartNo(),
-        }}
-      />
     </>
   );
 }

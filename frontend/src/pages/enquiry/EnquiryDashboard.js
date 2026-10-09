@@ -275,7 +275,7 @@ export default function EnquiryDashboard() {
             : "—",
         ],
         ["Email Subject", enq.emailSubject || "—"],
-        ["Item Description", enq.itemDescription || "—"],
+        ["Item Description", (Array.isArray(enq.parts) && enq.parts[0]?.itemDescription) || enq.itemDescription || "—"],
         ["Customer Part No", enq.partMapping?.customerPartNo || "—"],
         ["Customer Part Name", enq.partMapping?.customerPartName || "—"],
         ["Modified BO Part No", enq.partMapping?.modifiedBOPartNo || "—"],

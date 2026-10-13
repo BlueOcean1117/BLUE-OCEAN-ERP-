@@ -119,7 +119,7 @@ function extractDigits(partNo, position = "first", count = 3) {
    BO Part Number generation — now INLINE (no side panel).
    Formula is unchanged:  <customer prefix> + "B" + <first 3> + <process code> + <last 3>
 ───────────────────────────────────────────── */
-const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN"];
+const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN","BAR"];
 const FIXED_PREFIX     = "B";
 // The old builder always started with "ZET" (it just wasn't in its dropdown, so the dropdown
 // showed "FAB" while the number used "ZET"). It is now a real, visible option and the default.
@@ -215,15 +215,15 @@ function BOGenerateControl({ code, hasValue, canGenerate, onCodeChange, onGenera
   );
 }
 
-/* Optional part-specific Item Description. Hidden behind "+ Add Item Description"
+/* Customer Item Description (per part). Hidden behind "+ Add Customer Item Description"
    so nobody is forced to type one; with none, the common description applies. */
 function PartItemDescription({ shown, value, onShow, onChange, onRemove }) {
   if (!shown) {
     return (
       <div className="item-desc-cell">
-        <label className="part-label">Item Description</label>
+        <label className="part-label">Customer Item Description</label>
         <button type="button" className="item-desc-add-btn" onClick={onShow}>
-          <IconPlus /> Add Item Description
+          <IconPlus /> Add Customer Item Description
         </button>
       </div>
     );
@@ -231,8 +231,8 @@ function PartItemDescription({ shown, value, onShow, onChange, onRemove }) {
   return (
     <div className="item-desc-box item-desc-cell">
       <div className="item-desc-head">
-        <label className="part-label" title="This description applies to this part only">Item Description (own)</label>
-        <button type="button" className="item-desc-remove-btn" onClick={onRemove} title="Remove — use the common Item Description" aria-label="Use common Item Description">
+        <label className="part-label">Customer Item Description</label>
+        <button type="button" className="item-desc-remove-btn" onClick={onRemove} title="Remove this description" aria-label="Remove customer item description">
           <IconClose />
         </button>
       </div>
@@ -1455,8 +1455,8 @@ poDetails: (() => {
         .enq-form .tab-field-card label { font-size: 11.5px; }
         .enq-form .tab-field-card input:not([type="radio"]) { padding: 6px 9px; font-size: 13px; border-radius: 7px; box-sizing: border-box; width: 100%; min-width: 0; }
 
-        /* Row 1: Enquiry No | Customer | RFQ date | Item description */
-        .enq-form .tab-fields-grid.enq-row-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+        /* Row 1: Enquiry No (edit) | Customer | RFQ date | Enquiry-no. generation (create) */
+        .enq-form .tab-fields-grid.enq-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
         .enq-form .enquiry-gen-section { margin: 0; padding: 7px 10px; border-radius: 8px; background: #fff; }
         .enq-form .enquiry-gen-title { font-size: 11.5px; margin-bottom: 4px; }
         .enq-form .enquiry-gen-options { margin-bottom: 6px; }
@@ -1467,7 +1467,7 @@ poDetails: (() => {
         /* Parts: header + ONE row per part.
            The two stacked field grids inside a card are flattened (display: contents)
            so their cells flow into a single 5-column row:
-           Customer Part No | Part Name | BO Number | BO Part Name | Item Description */
+           Customer Part No | Customer Item Description | BO Part Name, then BO Number strip */
         .enq-form .parts-title-row { margin-bottom: 8px; }
         .enq-form .add-part-btn { padding: 5px 11px; font-size: 11.5px; }
         .enq-form .add-part-btn-bottom { width: auto; margin: 8px 0 0; padding: 6px 14px; font-size: 12px; }
@@ -1482,7 +1482,7 @@ poDetails: (() => {
         .enq-form .part-card-body,
         .enq-form .child-part-content {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 8px;
           align-items: start;
         }
@@ -1590,12 +1590,12 @@ poDetails: (() => {
 
         /* Narrower screens: fewer columns, still no wasted space */
         @media (max-width: 1100px) {
-          .enq-form .tab-fields-grid.enq-row-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .enq-form .tab-fields-grid.enq-row-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .enq-form .part-card-body,
           .enq-form .child-part-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (max-width: 640px) {
-          .enq-form .tab-fields-grid.enq-row-4,
+          .enq-form .tab-fields-grid.enq-row-3,
           .enq-form .part-card-body,
           .enq-form .child-part-content { grid-template-columns: 1fr; }
         }
@@ -1652,7 +1652,7 @@ poDetails: (() => {
                   </div>
                   {/* One compact row of fields. Create: Customer | RFQ | Item Desc | Enquiry No. generation.
                       Edit: Enquiry Number (now editable) | Customer | RFQ | Item Desc. */}
-                  <div className="tab-fields-grid enq-row-4">
+                  <div className="tab-fields-grid enq-row-3">
                     {/* Saved enquiries only: the generated number may be corrected. Create flow is unchanged. */}
                     {isEdit && (
                       <div className="tab-field-card">
@@ -1673,10 +1673,14 @@ poDetails: (() => {
                       <label className="bo-label required">Customer RFQ Date</label>
                       <input type="date" placeholder="dd-mm-yyyy" value={form.customerRFQDate} onChange={(e) => handleChange("customerRFQDate", e.target.value)} />
                     </div>
-                    <div className="tab-field-card">
-                      <label className="bo-label">Item Description</label>
-                      <input type="text" placeholder="Common description for all parts" title="Common description for all parts. A part can have its own via “+ Add Item Description” in Part Details." value={form.itemDescription} onChange={(e) => handleChange("itemDescription", e.target.value)} />
-                    </div>
+                    {/* The common Item Description input was removed. Older enquiries that already have one keep it
+                        (and it stays editable) so existing data never silently disappears. */}
+                    {isEdit && form.itemDescription && (
+                      <div className="tab-field-card">
+                        <label className="bo-label">Item Description (existing)</label>
+                        <input type="text" value={form.itemDescription} onChange={(e) => handleChange("itemDescription", e.target.value)} />
+                      </div>
+                    )}
 
                     {/* Enquiry Number Generation (create only — logic unchanged) */}
                     {!isEdit && (
@@ -1782,16 +1786,16 @@ poDetails: (() => {
                                   onChange={(e) => updatePartField(part.id, "customerPartNo", e.target.value)}
                                 />
                               </div>
-                              <div className="tab-field-card">
-                                <label className="part-label">Customer Part Name</label>
-                                <input
-                                  type="text"
-                                  placeholder="Enter customer part name"
-                                  value={part.customerPartName}
-                                  onChange={(e) => updatePartField(part.id, "customerPartName", e.target.value)}
-                                />
-                              </div>
                             </div>
+                            {/* ── Part-specific Item Description (optional) ── */}
+                            <PartItemDescription
+                              shown={part.showItemDesc}
+                              value={part.itemDescription}
+                              onShow={() => updatePartField(part.id, "showItemDesc", true)}
+                              onChange={(v) => updatePartField(part.id, "itemDescription", v)}
+                              onRemove={() => { updatePartField(part.id, "itemDescription", ""); updatePartField(part.id, "showItemDesc", false); }}
+                            />
+
                             <div className="tab-fields-grid">
                               <div className="tab-field-card bo-number-cell">
                                 <label className="part-label">Modified BO Part No</label>
@@ -1842,14 +1846,6 @@ poDetails: (() => {
                               </div>
                             </div>
 
-                            {/* ── Part-specific Item Description (optional) ── */}
-                            <PartItemDescription
-                              shown={part.showItemDesc}
-                              value={part.itemDescription}
-                              onShow={() => updatePartField(part.id, "showItemDesc", true)}
-                              onChange={(v) => updatePartField(part.id, "itemDescription", v)}
-                              onRemove={() => { updatePartField(part.id, "itemDescription", ""); updatePartField(part.id, "showItemDesc", false); }}
-                            />
 
                             {/* ── Child Parts — gated behind a Yes/No confirmation ── */}
                             {kids.length > 0 || part.childDecision === "yes" ? (
@@ -1879,16 +1875,14 @@ poDetails: (() => {
                                           onChange={(e) => updateChildField(part.id, child.id, "customerPartNo", e.target.value)}
                                         />
                                       </div>
-                                      <div className="tab-field-card">
-                                        <label className="part-label">Customer Part Name</label>
-                                        <input
-                                          type="text"
-                                          placeholder="Enter customer part name"
-                                          value={child.customerPartName}
-                                          onChange={(e) => updateChildField(part.id, child.id, "customerPartName", e.target.value)}
-                                        />
-                                      </div>
                                     </div>
+                                    <PartItemDescription
+                                      shown={child.showItemDesc}
+                                      value={child.itemDescription}
+                                      onShow={() => updateChildField(part.id, child.id, "showItemDesc", true)}
+                                      onChange={(v) => updateChildField(part.id, child.id, "itemDescription", v)}
+                                      onRemove={() => { updateChildField(part.id, child.id, "itemDescription", ""); updateChildField(part.id, child.id, "showItemDesc", false); }}
+                                    />
                                     <div className="tab-fields-grid child-fields-grid">
                                       <div className="tab-field-card bo-number-cell">
                                         <label className="part-label">Modified BO Part No</label>
@@ -1938,13 +1932,6 @@ poDetails: (() => {
                                         />
                                       </div>
                                     </div>
-                                    <PartItemDescription
-                                      shown={child.showItemDesc}
-                                      value={child.itemDescription}
-                                      onShow={() => updateChildField(part.id, child.id, "showItemDesc", true)}
-                                      onChange={(v) => updateChildField(part.id, child.id, "itemDescription", v)}
-                                      onRemove={() => { updateChildField(part.id, child.id, "itemDescription", ""); updateChildField(part.id, child.id, "showItemDesc", false); }}
-                                    />
                                   </div>
                                 </div>
                               ))}

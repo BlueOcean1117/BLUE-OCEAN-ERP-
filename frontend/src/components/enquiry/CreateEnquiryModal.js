@@ -98,7 +98,9 @@ function derivePrefix(name) {
 
 /* ─────────────────────────────────────────────
    Helper: extract first/last N digits from part no
+   (kept as-is; the BO Part Number now uses lastAlnum() below)
 ───────────────────────────────────────────── */
+// eslint-disable-next-line no-unused-vars
 function extractDigits(partNo, position = "first", count = 3) {
   if (!partNo) return "0".repeat(count);
   // Step 1: replace every symbol with "0", keep alphabets and numbers as-is
@@ -116,8 +118,9 @@ function extractDigits(partNo, position = "first", count = 3) {
   return "";
 }
 /* ─────────────────────────────────────────────
-   BO Part Number generation — now INLINE (no side panel).
-   Formula is unchanged:  <customer prefix> + "B" + <first 3> + <process code> + <last 3>
+   BO Part Number generation — INLINE (no side panel).
+   Format:  <customer name initial> + "B" + <process code> + <last 6 letters/digits of Customer Part No>
+   e.g.  Fecon · 807-63-001 · FAB  →  F + B + FAB + 763001  =  FBFAB763001
 ───────────────────────────────────────────── */
 const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN","BAR"];
 const FIXED_PREFIX     = "B";
@@ -126,8 +129,15 @@ const FIXED_PREFIX     = "B";
 const BO_DEFAULT_CODE  = "ZET";
 const PROCESS_CODES    = [BO_DEFAULT_CODE, ...COMPANY_CODES];
 
+/* Last N letters/digits of a part number. Symbols (- / . space …) are dropped, not replaced.
+   "807-63-001" → "80763001" → "763001".  Fewer than N characters → left-padded with 0. */
+function lastAlnum(partNo, count = 6) {
+  const clean = String(partNo || "").replace(/[^A-Za-z0-9]/g, "");
+  return clean.length >= count ? clean.slice(-count) : clean.padStart(count, "0");
+}
+
 function buildBOPartNo(customerName, customerPartNo, code) {
-  return `${derivePrefix(customerName)}${FIXED_PREFIX}${extractDigits(customerPartNo, "first", 3)}${code}${extractDigits(customerPartNo, "last", 3)}`;
+  return `${derivePrefix(customerName)}${FIXED_PREFIX}${code}${lastAlnum(customerPartNo, 6)}`;
 }
 
 /* ─────────────────────────────────────────────

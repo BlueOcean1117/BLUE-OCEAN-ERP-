@@ -122,7 +122,7 @@ function extractDigits(partNo, position = "first", count = 3) {
    Format:  <customer name initial> + "B" + <process code> + <last 6 letters/digits of Customer Part No>
    e.g.  Fecon · 807-63-001 · FAB  →  F + B + FAB + 763001  =  FBFAB763001
 ───────────────────────────────────────────── */
-const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN","BAR"];
+const COMPANY_CODES    = ["FAB","MAC","FOR","CAS","FAS","ASM","STA","FMC","CMC","RUB","PLA","LAS","PIN","BAR","WLD"];
 const FIXED_PREFIX     = "B";
 // The old builder always started with "ZET" (it just wasn't in its dropdown, so the dropdown
 // showed "FAB" while the number used "ZET"). It is now a real, visible option and the default.

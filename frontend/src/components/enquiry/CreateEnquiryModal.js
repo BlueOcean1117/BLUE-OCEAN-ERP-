@@ -1393,6 +1393,19 @@ poDetails: (() => {
         .bo-filled-display.bo-linked { background: #f0fdf4; border-color: #86efac; color: #166534; }
         .bo-filled-display.bo-linked em { font-weight: 400; color: #9ca3af; }
         .bo-linked-tag { font-size: 10px; font-weight: 600; letter-spacing: 0; color: #15803d; }
+        .bo-linked-input {
+          flex: 1 1 auto;
+          min-width: 0;
+          border: none;
+          background: transparent;
+          outline: none;
+          font-size: 13px;
+          font-weight: 700;
+          color: #166534;
+          letter-spacing: 0.04em;
+          font-family: inherit;
+        }
+        .bo-linked-input::placeholder { font-weight: 400; color: #9ca3af; }
 
         /* ── Part-specific Item Description ── */
         .item-desc-hint { display: block; margin-top: 5px; font-size: 11px; color: #6b7280; }
@@ -1817,7 +1830,16 @@ poDetails: (() => {
                                   />
                                   {part.boNumberMode === "customerPartNumber" ? (
                                     <div className="bo-filled-display bo-linked">
-                                      <span>{part.modifiedBOPartNo || <em>Enter Customer Part No</em>}</span>
+                                      {/* ✅ NEW — still auto-fetched/mirrored from Customer Part No
+                                          exactly as before (updatePartField keeps syncing it on every
+                                          Customer Part No edit), but now editable directly too. */}
+                                      <input
+                                        type="text"
+                                        className="bo-linked-input"
+                                        placeholder="Enter Customer Part No"
+                                        value={part.modifiedBOPartNo}
+                                        onChange={(e) => updatePartField(part.id, "modifiedBOPartNo", e.target.value)}
+                                      />
                                       <span className="bo-linked-tag">= Customer Part No</span>
                                     </div>
                                   ) : (
@@ -1904,7 +1926,15 @@ poDetails: (() => {
                                           />
                                           {child.boNumberMode === "customerPartNumber" ? (
                                             <div className="bo-filled-display bo-linked">
-                                              <span>{child.modifiedBOPartNo || <em>Enter Customer Part No</em>}</span>
+                                              {/* ✅ NEW — same mirror-from-Customer-Part-No logic as
+                                                  before, now editable directly too. */}
+                                              <input
+                                                type="text"
+                                                className="bo-linked-input"
+                                                placeholder="Enter Customer Part No"
+                                                value={child.modifiedBOPartNo}
+                                                onChange={(e) => updateChildField(part.id, child.id, "modifiedBOPartNo", e.target.value)}
+                                              />
                                               <span className="bo-linked-tag">= Customer Part No</span>
                                             </div>
                                           ) : (

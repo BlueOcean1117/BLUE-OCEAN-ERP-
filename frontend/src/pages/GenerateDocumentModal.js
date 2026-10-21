@@ -102,14 +102,14 @@ const PL_DEFAULT_EXPORTERS = {
 const PL_DEFAULT_CONSIGNEE = {
   companyName: "FECON LLC",
   lines: ["3460 Grant Drive,", "Lebanon, Ohio, 45036"],
-  attn: "Tracy Rose",
+  attn: "Roman Bunce",
   phone: "+1 513-696-4430",
-  email: "trrose@fecon.com",
+  email: "rbunce@fecon.com",
 };
 const PL_DEFAULT_BUYER = {
   companyName: "FECON LLC",
   lines: ["3460 Grant Drive,", "Lebanon, Ohio, 45036"],
-  attn: "Tracy Rose",
+  attn: "Roman Bunce",
   phone: "+1 513-696-4430",
   email: "",
 };
@@ -145,6 +145,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [labelStep, setLabelStep] = useState(null); // null | "choose" | "form"
   const [labelMode, setLabelMode] = useState(null); // "single" | "multiple"
   const [poInputs, setPoInputs] = useState([""]);
+  const [qtyInputs, setQtyInputs] = useState([""]); // ✅ NEW — quantity per PO (parallel to poInputs)
   const [labelGenerating, setLabelGenerating] = useState(false);
 
   // ✅ NEW — Packing List (7th option). Fully isolated state; nothing above
@@ -280,11 +281,13 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setLabelStep("choose");
     setLabelMode(null);
     setPoInputs([""]);
+    setQtyInputs([""]); // ✅ NEW
   };
 
   const chooseLabelMode = (mode) => {
     setLabelMode(mode);
     setPoInputs([""]);
+    setQtyInputs([""]); // ✅ NEW
     setLabelStep("form");
   };
 
@@ -292,13 +295,25 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setPoInputs((prev) => prev.map((v, i) => (i === idx ? value : v)));
   };
 
-  const addPoInput = () => setPoInputs((prev) => [...prev, ""]);
-  const removePoInput = (idx) => setPoInputs((prev) => prev.filter((_, i) => i !== idx));
+  // ✅ NEW — quantity for the PO at the same index
+  const updateQtyInput = (idx, value) => {
+    setQtyInputs((prev) => prev.map((v, i) => (i === idx ? value : v)));
+  };
+
+  const addPoInput = () => {
+    setPoInputs((prev) => [...prev, ""]);
+    setQtyInputs((prev) => [...prev, ""]); // ✅ NEW
+  };
+  const removePoInput = (idx) => {
+    setPoInputs((prev) => prev.filter((_, i) => i !== idx));
+    setQtyInputs((prev) => prev.filter((_, i) => i !== idx)); // ✅ NEW
+  };
 
   const backToDocList = () => {
     setLabelStep(null);
     setLabelMode(null);
     setPoInputs([""]);
+    setQtyInputs([""]); // ✅ NEW
   };
 
   const handleGenerateLabels = async () => {
@@ -307,11 +322,16 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       toast.error("Enter at least one PO Number");
       return;
     }
+    // ✅ NEW — quantities aligned 1:1 with poNumbers (same empty-PO filter, so no mismatch)
+    const poQuantities = poInputs
+      .map((p, i) => ({ po: p.trim(), qty: (qtyInputs[i] || "").trim() }))
+      .filter((x) => x.po)
+      .map((x) => x.qty);
     try {
       setLabelGenerating(true);
       const res = await API.post(
         `/shipment/${shipment._id}/generate-label`,
-        { poNumbers, category }, // ✅ CHANGED — category added
+        { poNumbers, poQuantities, category }, // ✅ CHANGED — poQuantities added
         { responseType: "blob" }
       );
       const contentType = res.headers?.["content-type"] || "";
@@ -416,6 +436,50 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     const qtys = plDistributeQty(qty, n);
     const weights = plProportionalWeights(qtys, grossWt);
     return qtys.map((q, i) => ({ qty: q, dimensions: dimensions || "", grossWt: weights[i] }));
+  };
+
+  // ✅ NEW — Multiple PO Numbers ("+ Add PO Number") all clone the SAME
+  // shipment total (addPlPoEntry sets every new entry's qty to the first
+  // entry's qty), so they're identified here by sharing that same qty —
+  // this is exactly the "+ Add PO Number" case and does NOT match the
+  // separate "Multiple PO" top-level mode's one-line-per-part lines,
+  // which normally each have a different part quantity and are left
+  // completely untouched by everything below.
+  const isSharedPoEntrySet = (items) =>
+    Array.isArray(items) &&
+    items.length > 1 &&
+    items.every((it) => Number(it.qty) === Number(items[0].qty));
+
+  // ✅ NEW — recalculates every PO entry's box quantities (and
+  // proportional weights) from the COMBINED box count across ALL PO
+  // entries, instead of each entry's own box count independently —
+  // e.g. 400 total / (PO1: 1 box + PO2: 1 box) = 200 per box, or
+  // 400 total / (PO1: 1 box + PO2: 3 boxes) = 100 per box. Only called
+  // from the explicit recalculation points below (box-count change,
+  // add/remove PO, "Split equally") — never from a manual per-box edit,
+  // so typed values keep sticking exactly as before in between.
+  const redistributePlBoxesAcrossPOs = (items) => {
+    if (!isSharedPoEntrySet(items)) return items;
+    const totalQty = Number(items[0].qty) || 0;
+    const totalGrossWt = Number(items[0].grossWt) || 0;
+    const boxCounts = items.map((it) => (it.pallets || []).length || 1);
+    const totalBoxes = boxCounts.reduce((s, n) => s + n, 0);
+    if (totalBoxes <= 0) return items;
+    const flatQtys = plDistributeQty(totalQty, totalBoxes);
+    const flatWeights = plProportionalWeights(flatQtys, totalGrossWt);
+    let cursor = 0;
+    return items.map((item, idx) => {
+      const n = boxCounts[idx];
+      const qtys = flatQtys.slice(cursor, cursor + n);
+      const weights = flatWeights.slice(cursor, cursor + n);
+      cursor += n;
+      const pallets = (item.pallets || []).map((p, i) => ({
+        ...p,
+        qty: qtys[i],
+        grossWt: weights[i],
+      }));
+      return { ...item, pallets };
+    });
   };
 
   // Turns the shipment's own parts (already stored on the Shipment List
@@ -526,8 +590,8 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   // the count necessarily reshapes the fields, so earlier manual values for
   // THAT line are replaced; manual edits are otherwise always preserved.
   const changePlPalletCount = (itemIdx, newCount) => {
-    setPlItems((prev) =>
-      prev.map((item, i) => {
+    setPlItems((prev) => {
+      const next = prev.map((item, i) => {
         if (i !== itemIdx) return item;
         const n = Math.min(10, Math.max(1, Number(newCount) || 1));
         return {
@@ -535,8 +599,13 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
           palletCount: n,
           pallets: plBuildBoxes(item.qty, item.grossWt, item.dimensions, n),
         };
-      })
-    );
+      });
+      // ✅ NEW — multiple PO entries sharing one shipment quantity:
+      // recompute every entry's box quantities from the combined box
+      // count across all of them (also covers the "Split equally" button,
+      // which calls this same function with the line's current count).
+      return redistributePlBoxesAcrossPOs(next);
+    });
   };
 
   // Typing in a QTY (or dimensions / gross weight) field only touches that
@@ -584,13 +653,29 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
         palletCount: 1,
         pallets: plBuildBoxes(base.qty, base.grossWt, base.dimensions, 1),
       };
-      return [...prev, newItem];
+      // ✅ NEW — the new entry shares the first entry's total shipment
+      // quantity, so recompute every entry's boxes from the now-combined
+      // box count across all PO entries.
+      return redistributePlBoxesAcrossPOs([...prev, newItem]);
     });
   };
 
   // ✅ NEW — removes one manually-added PO entry (never drops below 1).
+  // If the remaining entries still share one shipment quantity, their box
+  // split is recombined over the smaller total box count; if only one PO
+  // entry is left, it goes back to representing the FULL shipment
+  // quantity across its own boxes — the same as the original One PO
+  // behavior — since there's no other PO left to split with.
   const removePlItem = (itemIdx) => {
-    setPlItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== itemIdx) : prev));
+    setPlItems((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((_, i) => i !== itemIdx);
+      if (next.length === 1) {
+        const only = next[0];
+        return [{ ...only, pallets: plBuildBoxes(only.qty, only.grossWt, only.dimensions, only.palletCount) }];
+      }
+      return redistributePlBoxesAcrossPOs(next);
+    });
   };
 
   const updatePlHeaderField = (field, value) => {
@@ -602,20 +687,65 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
 
   // Per-line validation: every box QTY must be a whole number ≥ 0, and the
   // boxes must add up exactly to that line's shipment quantity.
-  const plValidationErrors = (plItems || []).reduce((errs, item, idx) => {
-    const label = item.description || `Line ${idx + 1}`;
-    const raw = (item.pallets || []).map((p) => String(p.qty ?? "").trim());
-    const badIdx = raw.findIndex((v) => v === "" || !/^\d+$/.test(v));
-    if (badIdx !== -1) {
-      errs.push(`${label}: Box ${badIdx + 1} QTY must be a whole number (0 or more).`);
-      return errs;
-    }
-    const sum = raw.reduce((s, v) => s + Number(v), 0);
-    if (sum !== Number(item.qty)) {
-      errs.push(`${label}: box quantities total ${sum}, but the shipment quantity is ${item.qty}.`);
-    }
-    return errs;
-  }, []);
+  // ✅ NEW — when multiple PO entries share one shipment quantity (the
+  // "+ Add PO Number" case), validate their box quantities COLLECTIVELY
+  // against that one shared total instead of against each entry's own
+  // (full) qty — otherwise every entry but one would always show a false
+  // mismatch. Every other case (One PO, or "Multiple PO" per-part lines
+  // with differing quantities) keeps the exact original per-line check.
+  const plValidationErrors = isSharedPoEntrySet(plItems)
+    ? (() => {
+        const errs = [];
+        let combinedSum = 0;
+        for (let idx = 0; idx < plItems.length; idx++) {
+          const item = plItems[idx];
+          const label = item.poNumber ? `PO ${item.poNumber}` : `PO entry ${idx + 1}`;
+          const raw = (item.pallets || []).map((p) => String(p.qty ?? "").trim());
+          const badIdx = raw.findIndex((v) => v === "" || !/^\d+$/.test(v));
+          if (badIdx !== -1) {
+            errs.push(`${label}: Box ${badIdx + 1} QTY must be a whole number (0 or more).`);
+            continue;
+          }
+          combinedSum += raw.reduce((s, v) => s + Number(v), 0);
+        }
+        if (errs.length === 0) {
+          const totalQty = Number(plItems[0].qty) || 0;
+          if (combinedSum !== totalQty) {
+            errs.push(`Combined box quantities across all PO Numbers total ${combinedSum}, but the shipment quantity is ${totalQty}.`);
+          }
+        }
+        return errs;
+      })()
+    : (plItems || []).reduce((errs, item, idx) => {
+        const label = item.description || `Line ${idx + 1}`;
+        const raw = (item.pallets || []).map((p) => String(p.qty ?? "").trim());
+        const badIdx = raw.findIndex((v) => v === "" || !/^\d+$/.test(v));
+        if (badIdx !== -1) {
+          errs.push(`${label}: Box ${badIdx + 1} QTY must be a whole number (0 or more).`);
+          return errs;
+        }
+        const sum = raw.reduce((s, v) => s + Number(v), 0);
+        if (sum !== Number(item.qty)) {
+          errs.push(`${label}: box quantities total ${sum}, but the shipment quantity is ${item.qty}.`);
+        }
+        return errs;
+      }, []);
+
+  // ✅ NEW — running box count across ALL PO entries (not reset per PO), so
+  // the "Box N" numbering below reads 1, 2, 3… straight through every PO
+  // Number instead of restarting at 1 for each one — e.g. PO1's one box
+  // shows "1/1", PO2's one box shows "2/1" (continuing the global count).
+  const plBoxGlobalOffsets = (() => {
+    let cursor = 0;
+    return (plItems || []).map((it) => {
+      const start = cursor;
+      cursor += (it.pallets || []).length;
+      return start;
+    });
+  })();
+
+  // ✅ NEW — total boxes across ALL PO entries (denominator for the global label)
+  const plBoxGlobalTotal = (plItems || []).reduce((s, it) => s + (it.pallets || []).length, 0);
 
   const handleGeneratePackingList = async () => {
     if (plValidationErrors.length > 0) {
@@ -806,6 +936,14 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                     onChange={(e) => updatePoInput(idx, e.target.value)}
                     style={{ flex: 1, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4 }}
                   />
+                  {/* ✅ NEW — Quantity for this PO */}
+                  <input
+                    type="text"
+                    placeholder="Quantity"
+                    value={qtyInputs[idx] ?? ""}
+                    onChange={(e) => updateQtyInput(idx, e.target.value)}
+                    style={{ width: 110, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4 }}
+                  />
                   {labelMode === "multiple" && poInputs.length > 1 && (
                     <button className="btn small" onClick={() => removePoInput(idx)}>✕</button>
                   )}
@@ -904,7 +1042,13 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                 Multiple PO → 1 line per part, each with its own dropdown). */}
             {plItems.map((item, itemIdx) => {
               const boxSum = (item.pallets || []).reduce((s, p) => s + (Number(p.qty) || 0), 0);
-              const mismatch = boxSum !== Number(item.qty);
+              // ✅ NEW — for multiple PO entries sharing one shipment
+              // quantity, each entry's own box sum is only ITS share of
+              // the total, not the full item.qty, so it's never compared
+              // against item.qty here; the combined total across every
+              // entry is validated once, collectively, below (plValidationErrors).
+              const sharedPoEntries = isSharedPoEntrySet(plItems);
+              const mismatch = sharedPoEntries ? false : boxSum !== Number(item.qty);
               return (
                 <div
                   key={itemIdx}
@@ -964,7 +1108,8 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                         style={{ display: "grid", gridTemplateColumns: "70px 90px 1fr 100px", gap: 6, alignItems: "center" }}
                       >
                         <div style={{ fontSize: 12, color: "#64748B" }}>
-                          Box {palletIdx + 1} <span style={{ opacity: 0.7 }}>({palletIdx + 1}/{item.pallets.length})</span>
+                          {/* ✅ NEW — global numbering: Box X (X/Total) across all POs */}
+                          Box {plBoxGlobalOffsets[itemIdx] + palletIdx + 1} <span style={{ opacity: 0.7 }}>({plBoxGlobalOffsets[itemIdx] + palletIdx + 1}/{plBoxGlobalTotal})</span>
                         </div>
                         <input
                           type="number"
@@ -995,7 +1140,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <div style={{ fontSize: 12, color: mismatch ? "#B91C1C" : "#16A34A" }}>
-                      Box quantities total {boxSum} / {item.qty} {mismatch ? "— must equal the shipment quantity" : "✓"}
+                      Box quantities total {boxSum}{sharedPoEntries ? "" : ` / ${item.qty}`} {mismatch ? "— must equal the shipment quantity" : "✓"}
                     </div>
                     <button
                       className="btn small"

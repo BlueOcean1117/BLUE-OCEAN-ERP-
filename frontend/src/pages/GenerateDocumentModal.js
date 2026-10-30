@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import API from "../services/api";
 import { toast } from "react-toastify";
+import { computeAllocation, splitEqually, mapShipmentParts } from "../utils/plAllocation"; // ✅ NEW — PO-wise allocation
 
 // ─────────────────────────────────────────────────────────────────────────
 // Document Generation modal
@@ -147,6 +148,11 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [poInputs, setPoInputs] = useState([""]);
   const [qtyInputs, setQtyInputs] = useState([""]); // ✅ NEW — quantity per PO (parallel to poInputs)
   const [labelGenerating, setLabelGenerating] = useState(false);
+  // ✅ NEW — what was typed in the Packing List (PO Number, quantity, number
+  // of boxes per PO). It is kept even after leaving the Packing List screens
+  // and is used to pre-fill the Label Document's PO / Quantity fields and to
+  // number its boxes. Empty until a Packing List PO Number has been entered.
+  const [plLabelSeed, setPlLabelSeed] = useState([]); // [{ poNumber, qty (string), boxes (number) }]
 
   // ✅ NEW — Packing List (7th option). Fully isolated state; nothing above
   // this touches or reads these, and this never touches the Label/other
@@ -158,6 +164,11 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [plItems, setPlItems] = useState([]); // [{ ...lookup fields, palletCount, pallets:[{qty,dimensions,grossWt}] }]
   const [plHeader, setPlHeader] = useState(null); // header fields + consignee/buyer, seeded from lookup
   const [plGenerating, setPlGenerating] = useState(false);
+  // ✅ NEW — PO-wise Part & Quantity Allocation (separate step "allocate").
+  // { pos: [{ poNumber, poDate, packingListNo, qty:[per part], boxes:[per part | null=auto] }],
+  //   confirmations: { repackParts: {[partIdx]: bool}, dedicatedBoxes: bool } }
+  const [plAlloc, setPlAlloc] = useState(null);
+  const [plAllocGenerating, setPlAllocGenerating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -285,9 +296,20 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   };
 
   const chooseLabelMode = (mode) => {
-    setLabelMode(mode);
-    setPoInputs([""]);
-    setQtyInputs([""]); // ✅ NEW
+    // ✅ NEW — if PO Numbers were typed in the Packing List, start the Label
+    // form with those PO Numbers and quantities (several POs → the
+    // multiple-PO form, so none of them is left out). Otherwise unchanged.
+    const seed = plLabelSeed;
+    const effectiveMode = seed.length > 1 ? "multiple" : mode;
+    setLabelMode(effectiveMode);
+    if (seed.length > 0) {
+      const rows = effectiveMode === "single" ? seed.slice(0, 1) : seed;
+      setPoInputs(rows.map((r) => r.poNumber));
+      setQtyInputs(rows.map((r) => r.qty));
+    } else {
+      setPoInputs([""]);
+      setQtyInputs([""]); // ✅ NEW
+    }
     setLabelStep("form");
   };
 
@@ -327,11 +349,20 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       .map((p, i) => ({ po: p.trim(), qty: (qtyInputs[i] || "").trim() }))
       .filter((x) => x.po)
       .map((x) => x.qty);
+    // ✅ NEW — number of boxes per PO as entered in the Packing List, aligned
+    // 1:1 with poNumbers. Only sent when EVERY PO here was entered in the
+    // Packing List; otherwise omitted and the label numbers its boxes the
+    // way it always did.
+    const boxCounts = poNumbers.map((po) => {
+      const hit = plLabelSeed.find((r) => r.poNumber.trim().toLowerCase() === po.toLowerCase());
+      return hit ? Number(hit.boxes) : null;
+    });
+    const poBoxes = boxCounts.every((n) => Number.isInteger(n) && n >= 0) ? boxCounts : undefined;
     try {
       setLabelGenerating(true);
       const res = await API.post(
         `/shipment/${shipment._id}/generate-label`,
-        { poNumbers, poQuantities, category }, // ✅ CHANGED — poQuantities added
+        { poNumbers, poQuantities, poBoxes, category }, // ✅ CHANGED — poQuantities, poBoxes added
         { responseType: "blob" }
       );
       const contentType = res.headers?.["content-type"] || "";
@@ -401,6 +432,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   };
 
   const startPackingListFlow = () => {
+    setPlAlloc(null);
     setPlStep("choose");
     setPlMode(null);
     setPlShipment(null);
@@ -409,6 +441,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   };
 
   const backToDocListFromPl = () => {
+    setPlAlloc(null);
     setPlStep(null);
     setPlMode(null);
     setPlShipment(null);
@@ -445,10 +478,22 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   // separate "Multiple PO" top-level mode's one-line-per-part lines,
   // which normally each have a different part quantity and are left
   // completely untouched by everything below.
-  const isSharedPoEntrySet = (items) =>
-    Array.isArray(items) &&
-    items.length > 1 &&
-    items.every((it) => Number(it.qty) === Number(items[0].qty));
+  // Lines that split ONE item across several PO entries share a
+  // `splitGroup` id (assigned in addPlPoEntry). Only lines in the same
+  // group are pooled; every other line stands alone, so different items /
+  // unrelated POs are never combined. Mirrors the grouping in
+  // generatePackingList (shipment.controller.js).
+  const plGroupKey = (item, idx) => (item.splitGroup ? `group:${item.splitGroup}` : `line:${idx}`);
+  const plGroupItems = (items) => {
+    const groups = new Map(); // key -> [{ item, idx }]
+    (items || []).forEach((item, idx) => {
+      const key = plGroupKey(item, idx);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, idx });
+    });
+    return groups;
+  };
+  const plBoxSum = (item) => (item.pallets || []).reduce((s, p) => s + (Number(p.qty) || 0), 0);
 
   // ✅ NEW — recalculates every PO entry's box quantities (and
   // proportional weights) from the COMBINED box count across ALL PO
@@ -459,27 +504,30 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   // add/remove PO, "Split equally") — never from a manual per-box edit,
   // so typed values keep sticking exactly as before in between.
   const redistributePlBoxesAcrossPOs = (items) => {
-    if (!isSharedPoEntrySet(items)) return items;
-    const totalQty = Number(items[0].qty) || 0;
-    const totalGrossWt = Number(items[0].grossWt) || 0;
-    const boxCounts = items.map((it) => (it.pallets || []).length || 1);
-    const totalBoxes = boxCounts.reduce((s, n) => s + n, 0);
-    if (totalBoxes <= 0) return items;
-    const flatQtys = plDistributeQty(totalQty, totalBoxes);
-    const flatWeights = plProportionalWeights(flatQtys, totalGrossWt);
-    let cursor = 0;
-    return items.map((item, idx) => {
-      const n = boxCounts[idx];
-      const qtys = flatQtys.slice(cursor, cursor + n);
-      const weights = flatWeights.slice(cursor, cursor + n);
-      cursor += n;
-      const pallets = (item.pallets || []).map((p, i) => ({
-        ...p,
-        qty: qtys[i],
-        grossWt: weights[i],
-      }));
-      return { ...item, pallets };
+    const result = [...items];
+    plGroupItems(items).forEach((members) => {
+      if (members.length < 2) return;
+      const first = members[0].item;
+      const totalQty = Number(first.qty) || 0;
+      const totalGrossWt = Number(first.grossWt) || 0;
+      const boxCounts = members.map(({ item }) => (item.pallets || []).length || 1);
+      const totalBoxes = boxCounts.reduce((s, n) => s + n, 0);
+      if (totalBoxes <= 0) return;
+      const flatQtys = plDistributeQty(totalQty, totalBoxes);
+      const flatWeights = plProportionalWeights(flatQtys, totalGrossWt);
+      let cursor = 0;
+      members.forEach(({ item, idx }, m) => {
+        const n = boxCounts[m];
+        const qtys = flatQtys.slice(cursor, cursor + n);
+        const weights = flatWeights.slice(cursor, cursor + n);
+        cursor += n;
+        result[idx] = {
+          ...item,
+          pallets: (item.pallets || []).map((p, i) => ({ ...p, qty: qtys[i], grossWt: weights[i] })),
+        };
+      });
     });
+    return result;
   };
 
   // Turns the shipment's own parts (already stored on the Shipment List
@@ -528,6 +576,30 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     return lines.filter((l) => l.qty > 0);
   };
 
+  // Shared by the existing One/Multiple PO flow and the new allocation flow.
+  const buildPlHeaderFor = (full) => (
+{
+    category,
+    packingListNo: full.invoice_no || "",
+    packingListDate: new Date().toISOString().slice(0, 10),
+    customerPoNumber: "",
+    customerPoDate: "",
+    pol: full.pol || "",
+    portOfDischarge: full.port_of_discharge || "",
+    finalDestination: full.final_destination || "",
+    carrierBy: full.mode ? `By ${full.mode}` : "",
+    containerNo: full.container_no || "",
+    invoiceNo: full.invoice_no || "",
+    invoiceDate: full.invoice_date || "",
+    exporter: {
+      name: (PL_DEFAULT_EXPORTERS[category] || PL_DEFAULT_EXPORTERS.consulting).name,
+      lines: [...(PL_DEFAULT_EXPORTERS[category] || PL_DEFAULT_EXPORTERS.consulting).lines],
+    },
+    consignee: { ...PL_DEFAULT_CONSIGNEE, lines: [...PL_DEFAULT_CONSIGNEE.lines] },
+    buyer: { ...PL_DEFAULT_BUYER, lines: [...PL_DEFAULT_BUYER.lines] },
+  }
+  );
+
   // Clicking One PO / Multiple PO. Reuses the existing shipment record
   // (GET /shipment/:id) and the existing Customer Address Book endpoint —
   // no PO number entry and no new search.
@@ -546,26 +618,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       setPlShipment(full);
       setPlMode(mode);
       setPlItems(items);
-      setPlHeader({
-        category,
-        packingListNo: full.invoice_no || "",
-        packingListDate: new Date().toISOString().slice(0, 10),
-        customerPoNumber: "",
-        customerPoDate: "",
-        pol: full.pol || "",
-        portOfDischarge: full.port_of_discharge || "",
-        finalDestination: full.final_destination || "",
-        carrierBy: full.mode ? `By ${full.mode}` : "",
-        containerNo: full.container_no || "",
-        invoiceNo: full.invoice_no || "",
-        invoiceDate: full.invoice_date || "",
-        exporter: {
-          name: (PL_DEFAULT_EXPORTERS[category] || PL_DEFAULT_EXPORTERS.consulting).name,
-          lines: [...(PL_DEFAULT_EXPORTERS[category] || PL_DEFAULT_EXPORTERS.consulting).lines],
-        },
-        consignee: { ...PL_DEFAULT_CONSIGNEE, lines: [...PL_DEFAULT_CONSIGNEE.lines] },
-        buyer: { ...PL_DEFAULT_BUYER, lines: [...PL_DEFAULT_BUYER.lines] },
-      });
+      setPlHeader(buildPlHeaderFor(full));
       setPlStep("edit");
     } catch (err) {
       await reportGenerateError(err);
@@ -640,7 +693,11 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const addPlPoEntry = () => {
     setPlItems((prev) => {
       const base = prev[0] || { qty: 0, grossWt: 0, netWt: 0, dimensions: "", description: "", partNo: "", unit: "pcs" };
+      // Tag the cloned line and its source as one split group so their
+      // boxes are validated together against the item's total quantity.
+      const splitGroup = base.splitGroup || `sg_${Date.now()}`;
       const newItem = {
+        splitGroup,
         poNumber: "",
         partNo: base.partNo,
         description: base.description,
@@ -656,7 +713,10 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       // ✅ NEW — the new entry shares the first entry's total shipment
       // quantity, so recompute every entry's boxes from the now-combined
       // box count across all PO entries.
-      return redistributePlBoxesAcrossPOs([...prev, newItem]);
+      return redistributePlBoxesAcrossPOs([
+        ...prev.map((it, i) => (i === 0 && !it.splitGroup ? { ...it, splitGroup } : it)),
+        newItem,
+      ]);
     });
   };
 
@@ -669,10 +729,18 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const removePlItem = (itemIdx) => {
     setPlItems((prev) => {
       if (prev.length <= 1) return prev;
+      const removed = prev[itemIdx];
       const next = prev.filter((_, i) => i !== itemIdx);
-      if (next.length === 1) {
-        const only = next[0];
-        return [{ ...only, pallets: plBuildBoxes(only.qty, only.grossWt, only.dimensions, only.palletCount) }];
+      if (!removed.splitGroup) return next;
+      const remaining = next.filter((it) => it.splitGroup === removed.splitGroup);
+      if (remaining.length === 1) {
+        // Only one line of that item left — it goes back to the FULL
+        // quantity across its own boxes and stops being a split group.
+        return next.map((it) => {
+          if (it.splitGroup !== removed.splitGroup) return it;
+          const { splitGroup, ...only } = it;
+          return { ...only, pallets: plBuildBoxes(only.qty, only.grossWt, only.dimensions, only.palletCount) };
+        });
       }
       return redistributePlBoxesAcrossPOs(next);
     });
@@ -685,51 +753,39 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setPlHeader((prev) => ({ ...prev, [block]: { ...prev[block], [field]: value } }));
   };
 
-  // Per-line validation: every box QTY must be a whole number ≥ 0, and the
-  // boxes must add up exactly to that line's shipment quantity.
-  // ✅ NEW — when multiple PO entries share one shipment quantity (the
-  // "+ Add PO Number" case), validate their box quantities COLLECTIVELY
-  // against that one shared total instead of against each entry's own
-  // (full) qty — otherwise every entry but one would always show a false
-  // mismatch. Every other case (One PO, or "Multiple PO" per-part lines
-  // with differing quantities) keeps the exact original per-line check.
-  const plValidationErrors = isSharedPoEntrySet(plItems)
-    ? (() => {
-        const errs = [];
-        let combinedSum = 0;
-        for (let idx = 0; idx < plItems.length; idx++) {
-          const item = plItems[idx];
-          const label = item.poNumber ? `PO ${item.poNumber}` : `PO entry ${idx + 1}`;
-          const raw = (item.pallets || []).map((p) => String(p.qty ?? "").trim());
-          const badIdx = raw.findIndex((v) => v === "" || !/^\d+$/.test(v));
-          if (badIdx !== -1) {
-            errs.push(`${label}: Box ${badIdx + 1} QTY must be a whole number (0 or more).`);
-            continue;
-          }
-          combinedSum += raw.reduce((s, v) => s + Number(v), 0);
-        }
-        if (errs.length === 0) {
-          const totalQty = Number(plItems[0].qty) || 0;
-          if (combinedSum !== totalQty) {
-            errs.push(`Combined box quantities across all PO Numbers total ${combinedSum}, but the shipment quantity is ${totalQty}.`);
-          }
-        }
-        return errs;
-      })()
-    : (plItems || []).reduce((errs, item, idx) => {
-        const label = item.description || `Line ${idx + 1}`;
+  // Validation: every box QTY must be a whole number ≥ 0, and the boxes
+  // must add up exactly to the item's quantity. A line on its own is
+  // checked against its own quantity; lines that split one item (same
+  // splitGroup) are checked COLLECTIVELY — their combined boxes must equal
+  // the item's total — never each line against the full quantity.
+  // Keep in sync with generatePackingList (shipment.controller.js).
+  const plValidationErrors = (() => {
+    const errs = [];
+    plGroupItems(plItems).forEach((members) => {
+      let badInput = false;
+      members.forEach(({ item, idx }) => {
+        const label = item.poNumber ? `PO ${item.poNumber}` : item.description || `Line ${idx + 1}`;
         const raw = (item.pallets || []).map((p) => String(p.qty ?? "").trim());
         const badIdx = raw.findIndex((v) => v === "" || !/^\d+$/.test(v));
         if (badIdx !== -1) {
           errs.push(`${label}: Box ${badIdx + 1} QTY must be a whole number (0 or more).`);
-          return errs;
+          badInput = true;
         }
-        const sum = raw.reduce((s, v) => s + Number(v), 0);
-        if (sum !== Number(item.qty)) {
-          errs.push(`${label}: box quantities total ${sum}, but the shipment quantity is ${item.qty}.`);
-        }
-        return errs;
-      }, []);
+      });
+      if (badInput) return;
+      const expected = Number(members[0].item.qty) || 0;
+      const actual = members.reduce((s, { item }) => s + plBoxSum(item), 0);
+      if (actual !== expected) {
+        const name = members[0].item.description || `Line ${members[0].idx + 1}`;
+        errs.push(
+          members.length > 1
+            ? `${name}: combined box quantities across all PO Numbers total ${actual}, but the expected item quantity is ${expected}.`
+            : `${name}: box quantities total ${actual}, but the shipment quantity is ${expected}.`
+        );
+      }
+    });
+    return errs;
+  })();
 
   // ✅ NEW — running box count across ALL PO entries (not reset per PO), so
   // the "Box N" numbering below reads 1, 2, 3… straight through every PO
@@ -768,6 +824,8 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
           ...plHeader,
           customerPoNumber,
           items: plItems.map((item) => ({
+            splitGroup: item.splitGroup,
+            poNumber: item.poNumber,
             description: item.description,
             hsnCode: item.hsnCode,
             qty: item.qty,
@@ -811,11 +869,364 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     }
   };
 
+  // ✅ NEW — header / exporter / consignee / buyer form. Moved out of the
+  // edit step unchanged so the allocation screen can reuse it; the edit
+  // step still renders exactly the same fields via renderPlHeaderSections().
+  // (forAllocation hides the two Customer PO fields, because every PO gets
+  // its own PO Number/Date on the allocation screen.)
+  const renderPlHeaderSections = (forAllocation = false) => (
+    <>
+            {/* Header fields */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              {[
+                ["packingListNo", "Packing List Number"],
+                ["packingListDate", "Packing List Date"],
+                ["customerPoNumber", "Customer PO Number"],
+                ["customerPoDate", "Customer PO Date"],
+                ["pol", "Port of Loading"],
+                ["portOfDischarge", "Port of Discharge"],
+                ["finalDestination", "Final Destination"],
+                ["carrierBy", "Carrier By"],
+                ["containerNo", "Container No."],
+                ["invoiceNo", "Invoice No."],
+                ["invoiceDate", "Invoice Date"],
+              ].filter(([field]) => !(forAllocation && (field === "customerPoNumber" || field === "customerPoDate"))).map(([field, label]) => (
+                <label key={field} style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                  {label}
+                  <input
+                    type="text"
+                    value={plHeader[field] ?? ""}
+                    onChange={(e) => updatePlHeaderField(field, e.target.value)}
+                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                  />
+                </label>
+              ))}
+            </div>
+
+            {/* Exporter / Consignor (pre-filled, editable) */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Exporter / Consignor</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+                <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                  Company Name
+                  <input
+                    type="text"
+                    value={plHeader.exporter?.name ?? ""}
+                    onChange={(e) => updatePlConsigneeField("exporter", "name", e.target.value)}
+                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                  />
+                </label>
+                <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                  Address (one line per row)
+                  <textarea
+                    value={(plHeader.exporter?.lines || []).join("\n")}
+                    onChange={(e) => updatePlConsigneeField("exporter", "lines", e.target.value.split("\n"))}
+                    rows={4}
+                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13, resize: "vertical" }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Consignee / Buyer */}
+            {["consignee", "buyer"].map((block) => (
+              <div key={block} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  {block === "consignee" ? "Customer / Consignee" : "Buyer (Other Than Consignee)"}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                    Company Name
+                    <input
+                      type="text"
+                      value={plHeader[block]?.companyName ?? ""}
+                      onChange={(e) => updatePlConsigneeField(block, "companyName", e.target.value)}
+                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                    Attn
+                    <input
+                      type="text"
+                      value={plHeader[block]?.attn ?? ""}
+                      onChange={(e) => updatePlConsigneeField(block, "attn", e.target.value)}
+                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3, gridColumn: "1 / -1" }}>
+                    Address (one line per row — type the full block, we'll split it)
+                    <textarea
+                      value={(plHeader[block]?.lines || []).join("\n")}
+                      onChange={(e) =>
+                        updatePlConsigneeField(block, "lines", e.target.value.split("\n"))
+                      }
+                      rows={2}
+                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13, resize: "vertical" }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                    Phone
+                    <input
+                      type="text"
+                      value={plHeader[block]?.phone ?? ""}
+                      onChange={(e) => updatePlConsigneeField(block, "phone", e.target.value)}
+                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                    />
+                  </label>
+                  {block === "consignee" && (
+                    <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                      Email
+                      <input
+                        type="text"
+                        value={plHeader[block]?.email ?? ""}
+                        onChange={(e) => updatePlConsigneeField(block, "email", e.target.value)}
+                        style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+            ))}
+
+    </>
+  );
+
+  // ✅ NEW — PO-wise Part & Quantity Allocation ─────────────────────────
+  const newAllocPo = (nParts) => ({
+    poNumber: "", poDate: "", packingListNo: "",
+    qty: Array(nParts).fill(""), boxes: Array(nParts).fill(null),
+  });
+
+  const startPlAllocation = async () => {
+    try {
+      setPlLoading(true);
+      const res = await API.get(`/shipment/${shipment._id}`);
+      const full = res.data || shipment;
+      const parts = mapShipmentParts(full.parts, full);
+      if (parts.length === 0 || parts.every((p) => p.qty <= 0)) {
+        toast.error("This shipment has no part quantities recorded, so there is nothing to allocate.");
+        return;
+      }
+      setPlShipment(full);
+      setPlHeader(buildPlHeaderFor(full));
+      setPlAlloc({
+        pos: [newAllocPo(parts.length), newAllocPo(parts.length)],
+        confirmations: { repackParts: {}, dedicatedBoxes: false },
+      });
+      setPlStep("allocate");
+    } catch (err) {
+      await reportGenerateError(err);
+    } finally {
+      setPlLoading(false);
+    }
+  };
+
+  const plAllocParts = plShipment ? mapShipmentParts(plShipment.parts, plShipment) : [];
+  const plAllocResult =
+    plAlloc && plAllocParts.length > 0
+      ? computeAllocation({
+          parts: plAllocParts,
+          pos: plAlloc.pos,
+          confirmations: plAlloc.confirmations,
+          requirePoDetails: true,
+        })
+      : null;
+
+  // ✅ NEW — what the Packing List currently holds, per PO Number: the PO
+  // Number typed, its quantity and its number of boxes. Read from whichever
+  // Packing List screen is open (One/Multiple PO screen, or the allocation
+  // screen) and remembered in plLabelSeed so the Label Document can use it.
+  // Nothing in the Packing List itself is changed by this.
+  const plCurrentSeed = (() => {
+    if (plStep === "allocate" && plAllocResult) {
+      return plAllocResult.perPo
+        .filter((p) => p.poNumber && p.totals.qty > 0)
+        .map((p) => ({ poNumber: p.poNumber, qty: String(p.totals.qty), boxes: p.totals.boxes }));
+    }
+    if (plStep === "edit") {
+      const byPo = new Map();
+      (plItems || []).forEach((it) => {
+        const po = String(it.poNumber || "").trim();
+        if (!po) return;
+        const cur = byPo.get(po.toLowerCase()) || { poNumber: po, qty: 0, boxes: 0 };
+        cur.qty += plBoxSum(it);
+        cur.boxes += (it.pallets || []).length;
+        byPo.set(po.toLowerCase(), cur);
+      });
+      return [...byPo.values()].map((x) => ({ ...x, qty: String(x.qty) }));
+    }
+    return [];
+  })();
+  const plCurrentSeedKey = JSON.stringify(plCurrentSeed);
+  useEffect(() => {
+    if (plCurrentSeed.length > 0) setPlLabelSeed(plCurrentSeed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plCurrentSeedKey]);
+
+  const updateAllocPoField = (j, field, value) =>
+    setPlAlloc((prev) => ({ ...prev, pos: prev.pos.map((po, k) => (k === j ? { ...po, [field]: value } : po)) }));
+
+  // Editing a quantity puts that part's boxes back on automatic, so a stale
+  // manual box split can never silently disagree with the new quantities.
+  const updateAllocQty = (j, i, value) =>
+    setPlAlloc((prev) => ({
+      ...prev,
+      pos: prev.pos.map((po, k) => ({
+        ...po,
+        qty: k === j ? po.qty.map((q, x) => (x === i ? value : q)) : po.qty,
+        boxes: po.boxes.map((b, x) => (x === i ? null : b)),
+      })),
+    }));
+
+  const updateAllocBox = (j, i, value) =>
+    setPlAlloc((prev) => {
+      const effective = plAllocResult ? plAllocResult.parts[i].boxes : [];
+      return {
+        ...prev,
+        pos: prev.pos.map((po, k) => ({
+          ...po,
+          boxes: po.boxes.map((b, x) => {
+            if (x !== i) return b;
+            if (k === j) return value;
+            return b === null || b === undefined ? String(effective[k] ?? 0) : b;
+          }),
+        })),
+      };
+    });
+
+  const resetAllocBoxes = (i) =>
+    setPlAlloc((prev) => ({ ...prev, pos: prev.pos.map((po) => ({ ...po, boxes: po.boxes.map((b, x) => (x === i ? null : b)) })) }));
+
+  // Equal split of one part across every PO; a remainder goes to the first
+  // POs one piece at a time (10 over 3 → 4/3/3), so nothing is lost.
+  const splitAllocPartEqually = (i) =>
+    setPlAlloc((prev) => {
+      const counts = splitEqually(plAllocParts[i].qty, prev.pos.length);
+      return {
+        ...prev,
+        pos: prev.pos.map((po, k) => ({
+          ...po,
+          qty: po.qty.map((q, x) => (x === i ? String(counts[k]) : q)),
+          boxes: po.boxes.map((b, x) => (x === i ? null : b)),
+        })),
+      };
+    });
+
+  const addAllocPo = () =>
+    setPlAlloc((prev) => ({ ...prev, pos: [...prev.pos, newAllocPo(plAllocParts.length)] }));
+  const removeAllocPo = (j) =>
+    setPlAlloc((prev) => (prev.pos.length <= 1 ? prev : { ...prev, pos: prev.pos.filter((_, k) => k !== j) }));
+  const setAllocRepack = (i, value) =>
+    setPlAlloc((prev) => ({ ...prev, confirmations: { ...prev.confirmations, repackParts: { ...prev.confirmations.repackParts, [i]: value } } }));
+  const setAllocDedicated = (value) =>
+    setPlAlloc((prev) => ({ ...prev, confirmations: { ...prev.confirmations, dedicatedBoxes: value } }));
+
+  const handleGenerateAllocated = async () => {
+    if (!plAllocResult || !plAllocResult.ok) {
+      toast.error(plAllocResult?.errors?.[0] || "Fix the allocation first.");
+      return;
+    }
+    try {
+      setPlAllocGenerating(true);
+      const res = await API.post(
+        `/shipment/packing-list/generate-allocated`,
+        {
+          ...plHeader,
+          shipmentId: plShipment._id,
+          pos: plAlloc.pos.map((po) => ({
+            poNumber: po.poNumber,
+            poDate: po.poDate,
+            qty: po.qty,
+            boxes: po.boxes,
+          })),
+          confirmations: plAlloc.confirmations,
+        },
+        { responseType: "blob" }
+      );
+      // Check the real file type from its first bytes ("%PDF" vs ZIP "PK"),
+      // so a response that isn't a PDF is never saved with a .pdf name.
+      const kindOf = async (data) => {
+        const head = new Uint8Array(await new Blob([data]).slice(0, 4).arrayBuffer());
+        if (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) return "pdf";
+        if (head[0] === 0x50 && head[1] === 0x4b) return "zip";
+        return "other";
+      };
+      let pdfData = res.data;
+      let kind = await kindOf(pdfData);
+
+      // An older backend answers with a ZIP of separate per-PO files. The user
+      // always wants ONE Packing List with every PO in it, so build that same
+      // combined list here and ask the existing single-document endpoint for
+      // it — one PDF regardless of the backend version.
+      if (kind === "zip") {
+        const fb = await API.post(
+          `/shipment/packing-list/generate`,
+          {
+            ...plHeader,
+            customerPoNumber: plAllocResult.perPo.map((p) => p.poNumber).join(", "),
+            customerPoDate: [...new Set(plAllocResult.perPo.map((p) => String(p.poDate || "").trim()).filter(Boolean))].join(", "),
+            items: plAllocResult.combinedItems.map((it) => ({
+              description: it.description,
+              hsnCode: it.hsnCode,
+              qty: it.qty,
+              unit: it.unit,
+              netWt: it.netWt,
+              grossWt: it.grossWt,
+              pallets: it.pallets.map((p) => ({ qty: Number(p.qty), dimensions: p.dimensions, grossWt: Number(p.grossWt) || 0 })),
+            })),
+          },
+          { responseType: "blob" }
+        );
+        pdfData = fb.data;
+        kind = await kindOf(pdfData);
+      }
+
+      if (kind !== "pdf") {
+        let msg = "The server did not return a valid PDF. Please restart the backend and try again.";
+        try {
+          const parsed = JSON.parse(await new Blob([pdfData]).text());
+          msg = (Array.isArray(parsed.details) && parsed.details.join(" | ")) || parsed.message || msg;
+        } catch { /* not JSON */ }
+        toast.error(msg);
+        return;
+      }
+      const blob = new Blob([pdfData], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PackingList_${plHeader.packingListNo || Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Packing List generated ✅");
+    } catch (err) {
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          const details = Array.isArray(parsed.details) ? parsed.details.join(" | ") : "";
+          toast.error(details || parsed.message || "Failed to generate Packing List");
+        } catch {
+          toast.error("Failed to generate Packing List");
+        }
+      } else {
+        toast.error(err.response?.data?.message || "Failed to generate Packing List");
+      }
+    } finally {
+      setPlAllocGenerating(false);
+    }
+  };
+
+  const plTh = { border: "1px solid #E2E8F0", padding: "5px 6px", background: "#F8FAFC", fontSize: 12, textAlign: "left", verticalAlign: "bottom", whiteSpace: "nowrap" };
+  const plTd = { border: "1px solid #E2E8F0", padding: "4px 6px", fontSize: 12, verticalAlign: "middle" };
+  const plCellInput = { width: 70, padding: "4px 6px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 12 };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal"
-        style={{ maxWidth: 560, width: "100%" }}
+        style={{ maxWidth: plStep === "allocate" ? 1040 : 560, width: "100%" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -978,9 +1389,275 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
               <button className="btn" disabled={plLoading} onClick={() => choosePlMode("multiple")}>
                 Multiple PO
               </button>
+              {/* ✅ NEW — allocate parts / quantities to each PO, one Packing List per PO */}
+              <button className="btn" disabled={plLoading} onClick={startPlAllocation}>
+                Allocate Parts to POs
+              </button>
             </div>
           </div>
         )}
+
+        {/* ✅ NEW — Packing List: PO-wise Part & Quantity Allocation */}
+        {plStep === "allocate" && plAlloc && plHeader && plAllocResult && (() => {
+          const res = plAllocResult;
+          const posN = plAlloc.pos.length;
+          return (
+            <div style={{ marginTop: 12, maxHeight: "72vh", overflowY: "auto" }}>
+              <button className="btn small" style={{ marginBottom: 10 }} onClick={() => setPlStep("choose")}>
+                ← Back
+              </button>
+              <h4 style={{ margin: "0 0 4px" }}>Allocate Parts to POs</h4>
+              <p style={{ fontSize: 12, color: "#64748B", margin: "0 0 10px" }}>
+                Enter how many pieces of each part belong to each PO (a part can be split between POs). Use as many
+                POs as you need (+ Add PO / ✕). All POs go into ONE Packing List (each part printed once, with its total); each part must be fully allocated.
+              </p>
+
+              {/* Quantity allocation */}
+              <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th style={plTh}>Part No</th>
+                      <th style={plTh}>Description</th>
+                      <th style={plTh}>Total Qty</th>
+                      {plAlloc.pos.map((po, j) => (
+                        <th key={j} style={{ ...plTh, minWidth: 130 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                              <input
+                                type="text"
+                                placeholder={`PO Number ${j + 1}`}
+                                value={po.poNumber}
+                                onChange={(e) => updateAllocPoField(j, "poNumber", e.target.value)}
+                                style={{ ...plCellInput, width: 100, fontWeight: 600 }}
+                              />
+                              {posN > 1 && (
+                                <button className="btn small" onClick={() => removeAllocPo(j)} title="Remove this PO">✕</button>
+                              )}
+                            </div>
+                            <input
+                              type="date"
+                              title="PO Date"
+                              value={po.poDate}
+                              onChange={(e) => updateAllocPoField(j, "poDate", e.target.value)}
+                              style={{ ...plCellInput, width: 130 }}
+                            />
+                          </div>
+                        </th>
+                      ))}
+                      <th style={plTh}>Allocated</th>
+                      <th style={plTh}>Remaining</th>
+                      <th style={plTh}>Status</th>
+                      <th style={plTh}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plAllocParts.map((part, i) => {
+                      const info = res.parts[i];
+                      return (
+                        <tr key={i}>
+                          <td style={plTd}>{part.partNo}</td>
+                          <td style={plTd}>{part.description}</td>
+                          <td style={{ ...plTd, fontWeight: 600 }}>{part.qty}</td>
+                          {plAlloc.pos.map((po, j) => {
+                            const raw = String(po.qty[i] ?? "").trim();
+                            const bad = raw !== "" && !/^\d+$/.test(raw);
+                            return (
+                              <td key={j} style={plTd}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  aria-label={`${part.partNo} quantity for PO ${j + 1}`}
+                                  value={po.qty[i] ?? ""}
+                                  onChange={(e) => updateAllocQty(j, i, e.target.value)}
+                                  style={{ ...plCellInput, borderColor: bad ? "#B91C1C" : "#CBD5E1" }}
+                                />
+                              </td>
+                            );
+                          })}
+                          <td style={plTd}>{info.allocated}</td>
+                          <td style={{ ...plTd, color: info.remaining === 0 ? "#16A34A" : "#B45309", fontWeight: 600 }}>{info.remaining}</td>
+                          <td style={{ ...plTd, whiteSpace: "nowrap", color: info.status === "ok" ? "#16A34A" : info.status === "under" ? "#B45309" : "#B91C1C" }}>
+                            {info.status === "ok" ? "✓ Allocated" : info.status === "under" ? `⚠ ${info.remaining} unallocated` : `✗ Over by ${-info.remaining}`}
+                          </td>
+                          <td style={plTd}>
+                            <button className="btn small" onClick={() => splitAllocPartEqually(i)} title="Split this part equally across all POs">
+                              Split equally
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr>
+                      <td style={{ ...plTd, fontWeight: 600 }} colSpan={3}>Total pieces</td>
+                      {res.perPo.map((p, j) => (
+                        <td key={j} style={{ ...plTd, fontWeight: 600 }}>{p.totals.qty}</td>
+                      ))}
+                      <td style={{ ...plTd, fontWeight: 600 }}>{res.totals.qty} / {res.original.qty}</td>
+                      <td style={plTd} colSpan={3}></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <button className="btn small" style={{ marginBottom: 14 }} onClick={addAllocPo}>+ Add PO</button>
+
+              {/* Box allocation */}
+              <div style={{ fontSize: 13, fontWeight: 600, margin: "4px 0 2px" }}>Box allocation</div>
+              <p style={{ fontSize: 12, color: "#64748B", margin: "0 0 6px" }}>
+                Each physical box goes to exactly one PO. Boxes are assigned automatically from the quantities; edit
+                them only if you need a different split. Box weight = pieces × unit weight + the box's own tare weight.
+              </p>
+              <div style={{ overflowX: "auto", marginBottom: 10 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th style={plTh}>Part No</th>
+                      <th style={plTh}>Boxes in shipment</th>
+                      {plAlloc.pos.map((po, j) => (
+                        <th key={j} style={plTh}>{po.poNumber || `PO ${j + 1}`}</th>
+                      ))}
+                      <th style={plTh}>Boxes assigned</th>
+                      <th style={plTh}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plAllocParts.map((part, i) => {
+                      const info = res.parts[i];
+                      const confirmedRepack = plAlloc.confirmations.repackParts[i] === true;
+                      return (
+                        <tr key={i}>
+                          <td style={plTd}>{part.partNo}</td>
+                          <td style={plTd}>{info.boxesOriginal}</td>
+                          {plAlloc.pos.map((po, j) => {
+                            const hasQty = (Number(po.qty[i]) || 0) > 0;
+                            return (
+                              <td key={j} style={plTd}>
+                                {hasQty ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    aria-label={`${part.partNo} boxes for PO ${j + 1}`}
+                                    value={info.boxesAuto ? String(info.boxes[j] ?? 0) : (po.boxes[i] ?? "")}
+                                    onChange={(e) => updateAllocBox(j, i, e.target.value)}
+                                    style={{ ...plCellInput, width: 56 }}
+                                  />
+                                ) : (
+                                  <span style={{ color: "#94A3B8" }}>—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td style={{ ...plTd, color: info.needsRepack ? (confirmedRepack ? "#B45309" : "#B91C1C") : info.boxesTotal === info.boxesOriginal ? "#16A34A" : "#B91C1C" }}>
+                            {info.boxesTotal}
+                          </td>
+                          <td style={plTd}>
+                            {info.needsRepack && (
+                              <label style={{ fontSize: 12, display: "flex", gap: 4, alignItems: "center" }}>
+                                <input type="checkbox" checked={confirmedRepack} onChange={(e) => setAllocRepack(i, e.target.checked)} />
+                                Repack into separate boxes
+                              </label>
+                            )}
+                            {!info.boxesAuto && (
+                              <button className="btn small" onClick={() => resetAllocBoxes(i)}>Reset to automatic</button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {plAllocParts.length > 1 && (
+                <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={plAlloc.confirmations.dedicatedBoxes}
+                    onChange={(e) => setAllocDedicated(e.target.checked)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    I confirm each part is packed in its own boxes (no box holds parts that belong to different POs).
+                    Box contents aren't recorded per box for this shipment.
+                  </span>
+                </label>
+              )}
+
+              {/* PO-wise summary */}
+              <div style={{ fontSize: 13, fontWeight: 600, margin: "4px 0 4px" }}>PO-wise summary</div>
+              <div style={{ overflowX: "auto", marginBottom: 12 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th style={plTh}>PO Number</th>
+                      <th style={plTh}>Pieces</th>
+                      <th style={plTh}>Net Wt (Kg)</th>
+                      <th style={plTh}>Gross Wt (Kg)</th>
+                      <th style={plTh}>Boxes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {res.perPo.map((p, j) => (
+                      <tr key={j}>
+                        <td style={plTd}>{p.poNumber || `PO ${j + 1}`}</td>
+                        <td style={plTd}>{p.totals.qty}</td>
+                        <td style={plTd}>{p.totals.net.toFixed(3)}</td>
+                        <td style={plTd}>{p.totals.gross.toFixed(2)}</td>
+                        <td style={plTd}>{p.totals.boxes}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ ...plTd, fontWeight: 600 }}>Total allocated</td>
+                      <td style={{ ...plTd, fontWeight: 600 }}>{res.totals.qty}</td>
+                      <td style={{ ...plTd, fontWeight: 600 }}>{res.totals.net.toFixed(3)}</td>
+                      <td style={{ ...plTd, fontWeight: 600 }}>{res.totals.gross.toFixed(2)}</td>
+                      <td style={{ ...plTd, fontWeight: 600 }}>{res.totals.boxes}</td>
+                    </tr>
+                    <tr>
+                      <td style={plTd}>Original shipment</td>
+                      <td style={plTd}>{res.original.qty}</td>
+                      <td style={plTd}>{res.original.net.toFixed(3)}</td>
+                      <td style={plTd}>{res.original.gross.toFixed(2)}</td>
+                      <td style={plTd}>{res.original.boxes}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {res.parts.some((p) => p.needsRepack && plAlloc.confirmations.repackParts[p.idx] === true) && (
+                <p style={{ fontSize: 12, color: "#B45309", margin: "0 0 10px" }}>
+                  Repacking adds boxes, so total boxes and gross weight are higher than the original shipment (extra tare weight per added box).
+                </p>
+              )}
+
+              <details style={{ marginBottom: 12 }}>
+                <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                  Shipment, exporter, consignee &amp; buyer details (shared by the whole Packing List)
+                </summary>
+                <div style={{ marginTop: 8 }}>{renderPlHeaderSections(true)}</div>
+              </details>
+
+              {res.errors.length > 0 && (
+                <div style={{
+                  background: "#FEF2F2", color: "#B91C1C", border: "1px solid #FCA5A5",
+                  borderRadius: 6, padding: "8px 10px", fontSize: 13, marginBottom: 10,
+                }}>
+                  {res.errors.map((e, i) => <div key={i}>{e}</div>)}
+                </div>
+              )}
+
+              <button
+                className="btn"
+                disabled={plAllocGenerating || !res.ok}
+                onClick={handleGenerateAllocated}
+                style={{ fontWeight: 600 }}
+              >
+                {plAllocGenerating ? "Generating Packing List…" : "Generate Packing List"}
+              </button>
+            </div>
+          );
+        })()}
 
         {/* ✅ NEW — Packing List: Step 3, editable preview (header fields +
             per-item pallet breakdown) + Generate */}
@@ -1047,8 +1724,12 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
               // the total, not the full item.qty, so it's never compared
               // against item.qty here; the combined total across every
               // entry is validated once, collectively, below (plValidationErrors).
-              const sharedPoEntries = isSharedPoEntrySet(plItems);
-              const mismatch = sharedPoEntries ? false : boxSum !== Number(item.qty);
+              const groupMembers = plGroupItems(plItems).get(plGroupKey(item, itemIdx)) || [];
+              const sharedPoEntries = groupMembers.length > 1;
+              const groupSum = groupMembers.reduce((s, { item: it }) => s + plBoxSum(it), 0);
+              const mismatch = sharedPoEntries
+                ? groupSum !== Number(item.qty)
+                : boxSum !== Number(item.qty);
               return (
                 <div
                   key={itemIdx}
@@ -1140,7 +1821,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                     <div style={{ fontSize: 12, color: mismatch ? "#B91C1C" : "#16A34A" }}>
-                      Box quantities total {boxSum}{sharedPoEntries ? "" : ` / ${item.qty}`} {mismatch ? "— must equal the shipment quantity" : "✓"}
+                      Box quantities total {boxSum}{sharedPoEntries ? ` (all POs combined: ${groupSum} / ${item.qty})` : ` / ${item.qty}`} {mismatch ? "— must equal the shipment quantity" : "✓"}
                     </div>
                     <button
                       className="btn small"
@@ -1153,117 +1834,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
               );
             })}
 
-            {/* Header fields */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-              {[
-                ["packingListNo", "Packing List Number"],
-                ["packingListDate", "Packing List Date"],
-                ["customerPoNumber", "Customer PO Number"],
-                ["customerPoDate", "Customer PO Date"],
-                ["pol", "Port of Loading"],
-                ["portOfDischarge", "Port of Discharge"],
-                ["finalDestination", "Final Destination"],
-                ["carrierBy", "Carrier By"],
-                ["containerNo", "Container No."],
-                ["invoiceNo", "Invoice No."],
-                ["invoiceDate", "Invoice Date"],
-              ].map(([field, label]) => (
-                <label key={field} style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                  {label}
-                  <input
-                    type="text"
-                    value={plHeader[field] ?? ""}
-                    onChange={(e) => updatePlHeaderField(field, e.target.value)}
-                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                  />
-                </label>
-              ))}
-            </div>
-
-            {/* Exporter / Consignor (pre-filled, editable) */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Exporter / Consignor</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
-                <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                  Company Name
-                  <input
-                    type="text"
-                    value={plHeader.exporter?.name ?? ""}
-                    onChange={(e) => updatePlConsigneeField("exporter", "name", e.target.value)}
-                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                  />
-                </label>
-                <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                  Address (one line per row)
-                  <textarea
-                    value={(plHeader.exporter?.lines || []).join("\n")}
-                    onChange={(e) => updatePlConsigneeField("exporter", "lines", e.target.value.split("\n"))}
-                    rows={4}
-                    style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13, resize: "vertical" }}
-                  />
-                </label>
-              </div>
-            </div>
-
-            {/* Consignee / Buyer */}
-            {["consignee", "buyer"].map((block) => (
-              <div key={block} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                  {block === "consignee" ? "Customer / Consignee" : "Buyer (Other Than Consignee)"}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                    Company Name
-                    <input
-                      type="text"
-                      value={plHeader[block]?.companyName ?? ""}
-                      onChange={(e) => updatePlConsigneeField(block, "companyName", e.target.value)}
-                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                    Attn
-                    <input
-                      type="text"
-                      value={plHeader[block]?.attn ?? ""}
-                      onChange={(e) => updatePlConsigneeField(block, "attn", e.target.value)}
-                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3, gridColumn: "1 / -1" }}>
-                    Address (one line per row — type the full block, we'll split it)
-                    <textarea
-                      value={(plHeader[block]?.lines || []).join("\n")}
-                      onChange={(e) =>
-                        updatePlConsigneeField(block, "lines", e.target.value.split("\n"))
-                      }
-                      rows={2}
-                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13, resize: "vertical" }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                    Phone
-                    <input
-                      type="text"
-                      value={plHeader[block]?.phone ?? ""}
-                      onChange={(e) => updatePlConsigneeField(block, "phone", e.target.value)}
-                      style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                    />
-                  </label>
-                  {block === "consignee" && (
-                    <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
-                      Email
-                      <input
-                        type="text"
-                        value={plHeader[block]?.email ?? ""}
-                        onChange={(e) => updatePlConsigneeField(block, "email", e.target.value)}
-                        style={{ padding: "5px 7px", border: "1px solid #CBD5E1", borderRadius: 4, fontSize: 13 }}
-                      />
-                    </label>
-                  )}
-                </div>
-              </div>
-            ))}
+            {renderPlHeaderSections()}
 
             {plValidationErrors.length > 0 && (
               <div style={{

@@ -115,6 +115,25 @@ const PL_DEFAULT_BUYER = {
   email: "",
 };
 
+// ✅ NEW — the description + Part Number of each shipment part in a Packing
+// List line, taken from the same shipment part record (part_desc / part_no).
+// The backend prints the Part Number under its description. Identical
+// description + part-number pairs are listed once.
+function plPartLines(subset) {
+  const seen = new Set();
+  const out = [];
+  (subset || []).forEach((p) => {
+    const description = p.part_desc || p.part_no || "";
+    const partNo = p.part_no || "";
+    if (!description && !partNo) return;
+    const key = `${description}\u0000${partNo}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ description, partNo });
+  });
+  return out;
+}
+
 async function reportGenerateError(err) {
   if (err.response?.data instanceof Blob) {
     try {
@@ -547,6 +566,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
         poNumber: "",
         partNo: subset.map((p) => p.part_no).filter(Boolean).join(", "),
         description: subset.map((p) => p.part_desc || p.part_no).filter(Boolean).join(", ") || fallbackDesc,
+        partLines: plPartLines(subset), // ✅ NEW — description + Part Number per part
         hsnCode: subset.find((p) => p.hsn_code)?.hsn_code || "",
         qty,
         unit: "pcs",
@@ -700,6 +720,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
         splitGroup,
         poNumber: "",
         partNo: base.partNo,
+        partLines: base.partLines, // ✅ NEW
         description: base.description,
         hsnCode: base.hsnCode,
         qty: base.qty,
@@ -827,6 +848,8 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
             splitGroup: item.splitGroup,
             poNumber: item.poNumber,
             description: item.description,
+            partNo: item.partNo, // ✅ NEW — printed under the description
+            partLines: item.partLines, // ✅ NEW
             hsnCode: (plHeader.hsnCode || "").trim() ? plHeader.hsnCode.trim() : item.hsnCode, // ✅ CHANGED — HSN Code typed in the form
             qty: item.qty,
             unit: item.unit,
@@ -1168,6 +1191,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
             customerPoDate: [...new Set(plAllocResult.perPo.map((p) => String(p.poDate || "").trim()).filter(Boolean))].join(", "),
             items: plAllocResult.combinedItems.map((it) => ({
               description: it.description,
+              partNo: it.partNo, // ✅ NEW — printed under the description
               hsnCode: it.hsnCode,
               qty: it.qty,
               unit: it.unit,

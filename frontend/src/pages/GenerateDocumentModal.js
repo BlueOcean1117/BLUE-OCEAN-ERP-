@@ -134,6 +134,17 @@ function plPartLines(subset) {
   return out;
 }
 
+// ✅ NEW — Label split preview: shipment total qty is divided across the
+// shipment's total boxes (whole numbers, first boxes take the remainder), and
+// each PO gets the boxes the user assigns to it, in order. Mirrors the backend.
+function labelSplitQtys(total, n) {
+  const t = Math.floor(Number(total) || 0);
+  const count = Math.max(1, Number(n) || 1);
+  const base = Math.floor(t / count);
+  const rem = t - base * count;
+  return Array.from({ length: count }, (_, i) => base + (i < rem ? 1 : 0));
+}
+
 async function reportGenerateError(err) {
   if (err.response?.data instanceof Blob) {
     try {
@@ -166,6 +177,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
   const [labelMode, setLabelMode] = useState(null); // "single" | "multiple"
   const [poInputs, setPoInputs] = useState([""]);
   const [qtyInputs, setQtyInputs] = useState([""]); // ✅ NEW — quantity per PO (parallel to poInputs)
+  const [boxInputs, setBoxInputs] = useState([""]); // ✅ NEW — No. of Boxes per PO (parallel to poInputs)
   const [labelGenerating, setLabelGenerating] = useState(false);
   // ✅ NEW — what was typed in the Packing List (PO Number, quantity, number
   // of boxes per PO). It is kept even after leaving the Packing List screens
@@ -312,6 +324,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setLabelMode(null);
     setPoInputs([""]);
     setQtyInputs([""]); // ✅ NEW
+    setBoxInputs([""]); // ✅ NEW
   };
 
   const chooseLabelMode = (mode) => {
@@ -325,9 +338,11 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       const rows = effectiveMode === "single" ? seed.slice(0, 1) : seed;
       setPoInputs(rows.map((r) => r.poNumber));
       setQtyInputs(rows.map((r) => r.qty));
+      setBoxInputs(rows.map((r) => (Number(r.boxes) > 0 ? String(r.boxes) : ""))); // ✅ NEW
     } else {
       setPoInputs([""]);
       setQtyInputs([""]); // ✅ NEW
+      setBoxInputs([""]); // ✅ NEW
     }
     setLabelStep("form");
   };
@@ -341,13 +356,20 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setQtyInputs((prev) => prev.map((v, i) => (i === idx ? value : v)));
   };
 
+  // ✅ NEW — number of boxes for the PO at the same index
+  const updateBoxInput = (idx, value) => {
+    setBoxInputs((prev) => prev.map((v, i) => (i === idx ? value : v)));
+  };
+
   const addPoInput = () => {
     setPoInputs((prev) => [...prev, ""]);
     setQtyInputs((prev) => [...prev, ""]); // ✅ NEW
+    setBoxInputs((prev) => [...prev, ""]); // ✅ NEW
   };
   const removePoInput = (idx) => {
     setPoInputs((prev) => prev.filter((_, i) => i !== idx));
     setQtyInputs((prev) => prev.filter((_, i) => i !== idx)); // ✅ NEW
+    setBoxInputs((prev) => prev.filter((_, i) => i !== idx)); // ✅ NEW
   };
 
   const backToDocList = () => {
@@ -355,28 +377,51 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
     setLabelMode(null);
     setPoInputs([""]);
     setQtyInputs([""]); // ✅ NEW
+    setBoxInputs([""]); // ✅ NEW
+  };
+
+  // ✅ NEW — shipment totals used for the automatic split preview
+  const labelShipTotalQty = Number(shipment.total_parts_count ?? shipment.total_qty)
+    || (Array.isArray(shipment.parts) ? shipment.parts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0) : 0);
+  const labelShipTotalBoxes = Number(shipment.total_no_of_boxes) || 0;
+  const labelEnteredBoxes = boxInputs.reduce((sum, b) => sum + (/^\d+$/.test(String(b).trim()) ? Number(b) : 0), 0);
+  const labelSplitBoxCount = labelShipTotalBoxes > 0 ? labelShipTotalBoxes : labelEnteredBoxes;
+  const labelBoxQtys = labelSplitBoxCount > 0 && labelShipTotalQty > 0 ? labelSplitQtys(labelShipTotalQty, labelSplitBoxCount) : [];
+  // qty a PO ends up with = its boxes' shares (boxes are handed out in PO order)
+  const labelPoQty = (idx) => {
+    const mine = /^\d+$/.test(String(boxInputs[idx] ?? "").trim()) ? Number(boxInputs[idx]) : 0;
+    const before = boxInputs.slice(0, idx).reduce((sum, b) => sum + (/^\d+$/.test(String(b).trim()) ? Number(b) : 0), 0);
+    if (!mine || labelBoxQtys.length < before + mine) return "";
+    return String(labelBoxQtys.slice(before, before + mine).reduce((sum, q) => sum + q, 0));
   };
 
   const handleGenerateLabels = async () => {
-    const poNumbers = poInputs.map((p) => p.trim()).filter(Boolean);
+    // ✅ NEW — PO Number + No. of Boxes per row. Quantity and gross weight are
+    // split automatically from the shipment's totals, so they are not typed.
+    const rows = poInputs
+      .map((p, i) => ({ po: p.trim(), boxes: String(boxInputs[i] ?? "").trim(), n: i + 1 }))
+      .filter((r) => r.po || r.boxes);
+    for (const r of rows) {
+      if (!r.po) { toast.error(`Row ${r.n}: PO Number cannot be empty.`); return; }
+      if (!/^\d+$/.test(r.boxes) || Number(r.boxes) <= 0) { toast.error(`${r.po}: No. of Boxes must be a valid positive whole number.`); return; }
+    }
+    const seenPo = new Set();
+    for (const r of rows) {
+      if (seenPo.has(r.po.toLowerCase())) { toast.error(`Duplicate PO Number: ${r.po}.`); return; }
+      seenPo.add(r.po.toLowerCase());
+    }
+    const poNumbers = rows.map((r) => r.po);
     if (poNumbers.length === 0) {
       toast.error("Enter at least one PO Number");
       return;
     }
-    // ✅ NEW — quantities aligned 1:1 with poNumbers (same empty-PO filter, so no mismatch)
-    const poQuantities = poInputs
-      .map((p, i) => ({ po: p.trim(), qty: (qtyInputs[i] || "").trim() }))
-      .filter((x) => x.po)
-      .map((x) => x.qty);
-    // ✅ NEW — number of boxes per PO as entered in the Packing List, aligned
-    // 1:1 with poNumbers. Only sent when EVERY PO here was entered in the
-    // Packing List; otherwise omitted and the label numbers its boxes the
-    // way it always did.
-    const boxCounts = poNumbers.map((po) => {
-      const hit = plLabelSeed.find((r) => r.poNumber.trim().toLowerCase() === po.toLowerCase());
-      return hit ? Number(hit.boxes) : null;
-    });
-    const poBoxes = boxCounts.every((n) => Number.isInteger(n) && n >= 0) ? boxCounts : undefined;
+    const enteredBoxes = rows.reduce((sum, r) => sum + Number(r.boxes), 0);
+    if (labelShipTotalBoxes > 0 && enteredBoxes !== labelShipTotalBoxes) {
+      toast.error(`Total No. of Boxes entered (${enteredBoxes}) must equal the shipment's total boxes (${labelShipTotalBoxes}).`);
+      return;
+    }
+    const poBoxes = rows.map((r) => Number(r.boxes));
+    const poQuantities = poNumbers.map(() => ""); // quantity is split by the server from the shipment total
     try {
       setLabelGenerating(true);
       const res = await API.post(
@@ -390,7 +435,7 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = isZip ? `Labels_${Date.now()}.zip` : `Label_${poNumbers[0]}.pdf`;
+      a.download = isZip ? `${String(shipment.invoice_no || "Labels").replace(/[^a-zA-Z0-9_.-]/g, "") || "Labels"}.zip` : poNumbers.length > 1 ? `Labels_${Date.now()}.pdf` : `Label_${poNumbers[0]}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1372,12 +1417,23 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                     onChange={(e) => updatePoInput(idx, e.target.value)}
                     style={{ flex: 1, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4 }}
                   />
-                  {/* ✅ NEW — Quantity for this PO */}
+                  {/* ✅ CHANGED — Quantity is calculated automatically (read-only) */}
                   <input
                     type="text"
-                    placeholder="Quantity"
-                    value={qtyInputs[idx] ?? ""}
-                    onChange={(e) => updateQtyInput(idx, e.target.value)}
+                    readOnly
+                    title="Calculated from the shipment total quantity ÷ total boxes"
+                    placeholder="Quantity (auto)"
+                    value={labelPoQty(idx)}
+                    style={{ width: 110, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4, background: "#F1F5F9" }}
+                  />
+                  {/* ✅ NEW — No. of Boxes for this PO */}
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="No. of Boxes"
+                    value={boxInputs[idx] ?? ""}
+                    onChange={(e) => updateBoxInput(idx, e.target.value)}
                     style={{ width: 110, padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 4 }}
                   />
                   {labelMode === "multiple" && poInputs.length > 1 && (
@@ -1385,6 +1441,12 @@ export default function GenerateDocumentModal({ shipment, onClose }) {
                   )}
                 </div>
               ))}
+              <div style={{ fontSize: 12, color: "#64748B" }}>
+                Shipment: {labelShipTotalQty || "—"} pcs in {labelShipTotalBoxes || "—"} boxes
+                {labelBoxQtys.length > 0 ? ` → about ${labelBoxQtys[0]} pcs per box` : ""}. Enter how many of these boxes
+                belong to each PO — quantity and gross weight are split automatically and one label is made per box.
+                {labelShipTotalBoxes > 0 ? ` Boxes entered: ${labelEnteredBoxes} / ${labelShipTotalBoxes}.` : ""}
+              </div>
               {labelMode === "multiple" && (
                 <button className="btn small" style={{ alignSelf: "flex-start" }} onClick={addPoInput}>
                   + Add another PO Number

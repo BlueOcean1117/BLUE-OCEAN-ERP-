@@ -8,6 +8,7 @@ import EnquiryFilters from "../../components/enquiry/EnquiryFilters";
 import EnquiryTable from "../../components/enquiry/EnquiryTable";
 import CreateEnquiryModal from "../../components/enquiry/CreateEnquiryModal";
 import ViewEnquiryModal from "../../components/enquiry/ViewEnquiryModal";
+import { exportEnquiriesToExcel } from "../../utils/exportEnquiryExcel"; // ✅ NEW
 import "../../styles/enquiry.css";
 
 /* ============================================================================
@@ -72,6 +73,7 @@ export default function EnquiryDashboard() {
   const [selectedEnquiry, setSelectedEnquiry] = useState(null);
   const [editData, setEditData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false); // ✅ NEW
 
   // Fetch stats
   const fetchStats = useCallback(async () => {
@@ -298,6 +300,20 @@ export default function EnquiryDashboard() {
     doc.save(`Enquiry_${enq.enquiryNumber || "details"}.pdf`);
   };
 
+  // ✅ NEW — Export ALL enquiries (ignores filters/pagination) to .xlsx
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    try {
+      const count = await exportEnquiriesToExcel(API);
+      toast.success(`Exported ${count} enquiries to Excel`);
+    } catch (err) {
+      console.error("Export Excel error:", err);
+      toast.error("Failed to export Excel");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const lastUpdated = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -346,6 +362,28 @@ export default function EnquiryDashboard() {
           onFilterChange={handleFilterChange}
           filterOptions={filterOptions}
         />
+
+        {/* ✅ NEW — Export Excel button (above table) */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExporting}
+            style={{
+              padding: "8px 16px",
+              background: "#15803D",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isExporting ? "not-allowed" : "pointer",
+              opacity: isExporting ? 0.7 : 1,
+            }}
+          >
+            {isExporting ? "Exporting..." : "Export Excel"}
+          </button>
+        </div>
 
         {/* Table */}
         {loading ? (

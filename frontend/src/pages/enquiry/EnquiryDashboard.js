@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react"; // ✅ NEW: useRef
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { toast } from "react-toastify";
@@ -50,6 +50,92 @@ import "../../styles/enquiry.css";
 
 const LIMIT = 20; // [INFINITE SCROLL] was 4
 
+// ✅ NEW — Global search helpers --------------------------------------------
+// Flattens EVERY value of an enquiry (parent parts, child parts, suppliers,
+// PO numbers, descriptions, dates...) into one lowercase searchable string.
+const SEARCH_SKIP_KEYS = new Set(["_id", "__v", "editHistory", "updatedAt", "boNumberMode", "isChildPart", "sectionColor"]);
+const SEARCH_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const SEARCH_ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
+function searchDateForms(str) {
+  const d = new Date(str);
+  if (isNaN(d)) return [];
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  // same formats the table shows: 2026-03-11 and 11-Mar-26 (+ dd/mm/yyyy)
+  return [`${yyyy}-${mm}-${dd}`, `${dd}-${SEARCH_MONTHS[d.getMonth()]}-${String(yyyy).slice(-2)}`, `${dd}/${mm}/${yyyy}`];
+}
+// ✅ NEW — normalise so "AB-123", "ab 123", "AB–123" (en-dash), "AB/123", "AB123" and
+// text pasted with hidden/non-breaking characters all find each other.
+const searchNorm = (str) => String(str).normalize("NFKC").replace(/[\u200B-\u200D\uFEFF]/g, "").toLowerCase();
+const searchCompact = (str) => searchNorm(str).replace(/[^\p{L}\p{N}]+/gu, "");
+// ✅ NEW — one entry per enquiry: text for the global search bar PLUS dedicated
+// lists of ALL inquiry nos / PO nos / part nos / supplier names (parent parts,
+// child parts, every per-part supplier & PO) for the Search inquiry / PO / part boxes.
+const makeSearchIdx = (values) => {
+  const v = values.filter((x) => x !== null && x !== undefined && x !== "").map(String);
+  return {
+    text: v.map(searchNorm).join(" | "),
+    compact: v.map(searchCompact).filter(Boolean).join("|"), // "|" keeps values separate
+  };
+};
+function matchSearchIdx(idx, query) {
+  const qn = searchNorm(query);
+  const terms = qn.split(/\s+/).filter(Boolean);
+  const qc = searchCompact(qn);
+  if (!terms.length) return true;
+  const allTerms = terms.every((t) => {
+    const tc = searchCompact(t);
+    return idx.text.includes(t) || (tc && idx.compact.includes(tc));
+  });
+  return allTerms || !!(qc && idx.compact.includes(qc));
+}
+function buildSearchIndex(enq) {
+  const arr = (x) => (Array.isArray(x) ? x : []);
+  const partFields = (p) => (p ? [p.customerPartNo, p.customerPartName, p.modifiedBOPartNo, p.boPartName] : []);
+  const partVals = [
+    ...partFields(enq.partMapping),
+    ...arr(enq.parts).flatMap((p) => [...partFields(p), ...arr(p.children).flatMap(partFields)]),
+    ...arr(enq.partSuppliers).map((ps) => ps.customerPartNo),
+  ];
+  const sups = arr(enq.partSuppliers).flatMap((ps) => arr(ps.suppliers));
+  const poVals = [
+    enq.poDetails?.poNumber,
+    ...arr(enq.poDetailsList).map((x) => x?.poNumber),
+    ...sups.map((s) => (typeof s === "string" ? "" : s?.poNumber)),
+  ];
+  const supVals = [
+    enq.poDetails?.supplierName,
+    ...arr(enq.poDetailsList).map((x) => x?.supplierName),
+    ...sups.map((s) => (typeof s === "string" ? s : s?.name)),
+  ];
+  return {
+    enq,
+    all: makeSearchIdx(collectSearchText(enq)),
+    inq: makeSearchIdx([enq.enquiryNumber]),
+    po: makeSearchIdx(poVals),
+    part: makeSearchIdx(partVals),
+    sup: makeSearchIdx(supVals),
+  };
+}
+function collectSearchText(value, out = []) {
+  if (value === null || value === undefined || typeof value === "boolean") return out;
+  if (Array.isArray(value)) {
+    value.forEach((v) => collectSearchText(v, out));
+    return out;
+  }
+  if (typeof value === "object") {
+    Object.entries(value).forEach(([k, v]) => {
+      if (!SEARCH_SKIP_KEYS.has(k)) collectSearchText(v, out);
+    });
+    return out;
+  }
+  const str = String(value);
+  out.push(str);
+  if (SEARCH_ISO_DATE.test(str)) out.push(...searchDateForms(str));
+  return out;
+}
+
 export default function EnquiryDashboard() {
   const [stats, setStats] = useState({});
   const [enquiries, setEnquiries] = useState([]);
@@ -74,6 +160,8 @@ export default function EnquiryDashboard() {
   const [editData, setEditData] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExporting, setIsExporting] = useState(false); // ✅ NEW
+  const searchCacheRef = useRef(null); // ✅ NEW — all enquiries, pre-indexed for search
+  const searchReqRef = useRef(0);      // ✅ NEW — ignores out-of-date search responses
 
   // Fetch stats
   const fetchStats = useCallback(async () => {
@@ -106,6 +194,61 @@ export default function EnquiryDashboard() {
       setLoading(true);
     }
     try {
+      // ✅ NEW — GLOBAL SEARCH: whatever is typed is matched against every field of
+      // every enquiry in the database (parent + child parts, suppliers, POs, dates...),
+      // not just the current page. Other filters/sort still apply as before.
+      const reqId = ++searchReqRef.current;
+      const searchText = (filters.search || "").trim();
+      const inqText = (filters.inquiryNumber || "").trim();
+      const poText = (filters.poNumber || "").trim();
+      const partText = (filters.partNumber || "").trim();
+      const supText = (filters.supplierName || "").trim();
+      if (searchText || inqText || poText || partText || supText) {
+        // Search bar + Search inquiry / PO / part boxes + Supplier dropdown are matched
+        // here (not on the server) so child parts and every per-part supplier / PO count.
+        const baseParams = {
+          ...(filters.customerName && { customerName: filters.customerName }),
+          ...(filters.rfqDateFrom && { rfqDateFrom: filters.rfqDateFrom }),
+          ...(filters.rfqDateTo && { rfqDateTo: filters.rfqDateTo }),
+          ...(filters.generatedBy && { generatedBy: filters.generatedBy }),
+          ...(sortField && { sortField, sortOrder }),
+        };
+        const cacheKey = JSON.stringify(baseParams);
+        const cache = searchCacheRef.current;
+        let indexed;
+        if (cache && cache.key === cacheKey && (page > 1 || Date.now() - cache.time < 60000)) {
+          indexed = cache.list; // typing more letters re-filters instantly, no refetch
+        } else {
+          const all = [];
+          let p = 1;
+          let tp = 1;
+          do {
+            const r = await API.get("/enquiry", { params: { ...baseParams, page: p, limit: 500 } });
+            all.push(...(r.data.enquiries || []));
+            tp = r.data.totalPages || 1;
+            p += 1;
+          } while (p <= tp);
+          indexed = all.map(buildSearchIndex);
+          searchCacheRef.current = { key: cacheKey, time: Date.now(), list: indexed };
+        }
+        if (reqId !== searchReqRef.current) return; // a newer keystroke superseded this one
+        const matched = indexed
+          .filter(
+            (idx) =>
+              (!searchText || matchSearchIdx(idx.all, searchText)) &&
+              (!inqText || matchSearchIdx(idx.inq, inqText)) &&
+              (!poText || matchSearchIdx(idx.po, poText)) &&
+              (!partText || matchSearchIdx(idx.part, partText)) &&
+              (!supText || matchSearchIdx(idx.sup, supText))
+          )
+          .map((x) => x.enq);
+        const slice = matched.slice((page - 1) * LIMIT, page * LIMIT);
+        setEnquiries((prev) => (page === 1 ? slice : [...prev, ...slice]));
+        setTotal(matched.length);
+        setTotalPages(Math.max(1, Math.ceil(matched.length / LIMIT)));
+        return;
+      }
+
       const params = {
         page,
         limit: LIMIT,
@@ -168,6 +311,7 @@ export default function EnquiryDashboard() {
   // user had already scrolled to a later page — avoids re-appending a
   // stale page onto the freshly-mutated list.
   const resetAndRefetch = () => {
+    searchCacheRef.current = null; // ✅ NEW — drop cached search data after create/update
     if (page === 1) {
       fetchEnquiries();
     } else {

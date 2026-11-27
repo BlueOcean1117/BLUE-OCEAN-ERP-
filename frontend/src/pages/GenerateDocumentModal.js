@@ -40,6 +40,7 @@ const PDF_FILENAMES = {
   authority_letter: "Authority_Letter.pdf",
   cargo_security_declaration: "Cargo_Security_Declaration.pdf",
   // ✅ NEW — Technologies
+  tech_evd: "EVD.pdf", 
   tech_end_use_letter: "End_Use_Letter.pdf",
   tech_scomet: "SCOMET_Declaration.pdf",
   tech_authority_letter: "Authority_Letter.pdf",
